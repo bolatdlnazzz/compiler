@@ -1,0 +1,14 @@
+# factorial.zlang – demonstrates recursion and conditional logic
+
+func factorial(n: int) -> int {
+    if n <= 1 {
+        return 1
+    }
+    return n * factorial(n - 1)
+}
+
+func main() -> void {
+    for i in range(0, 13) {
+        print(factorial(i))
+    }
+}

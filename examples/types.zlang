@@ -1,0 +1,60 @@
+# types.zlang – demonstrates the type system and type inference
+
+func add(a: int, b: int) -> int {
+    return a + b
+}
+
+func multiply(x: float, y: float) -> float {
+    return x * y
+}
+
+func greet(name: string) -> string {
+    return "Hello, " + name + "!"
+}
+
+func is_positive(n: int) -> bool {
+    return n > 0
+}
+
+func main() -> void {
+    # Integer arithmetic
+    let x: int = 10
+    let y: int = 7
+    let sum = add(x, y)         # type inference: sum is int
+    print(sum)
+
+    # Float arithmetic with int->float widening
+    let pi: float = 3.14159
+    let radius: float = 5.0
+    let area = multiply(pi, radius * radius)   # inferred: float
+    print(area)
+
+    # String operations
+    let msg = greet("ZLang")    # inferred: string
+    print(msg)
+
+    # Boolean logic
+    let positive = is_positive(42)   # inferred: bool
+    if positive {
+        print("42 is positive")
+    } else {
+        print("42 is not positive")
+    }
+
+    # For loop over a range
+    let total: int = 0
+    for i in range(1, 6) {
+        total = total + i
+    }
+    print(total)   # prints 15 (1+2+3+4+5)
+
+    # While loop with compound condition
+    let a: int = 1
+    let b: int = 1
+    while a < 100 and b < 100 {
+        let tmp = a + b
+        a = b
+        b = tmp
+    }
+    print(a)
+}

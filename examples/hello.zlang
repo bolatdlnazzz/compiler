@@ -1,0 +1,5 @@
+# Hello World – the simplest ZLang program
+
+func main() -> void {
+    print("Hello, World!")
+}
