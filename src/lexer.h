@@ -2,73 +2,74 @@
 
 #include <string>
 #include <string_view>
-#include <unordered_set>
+#include <vector>
 
-namespace Astra {
+namespace Lexer {
 
-    enum class TokenType {
-        Identifier,
-        Keyword,
-        IntLiteral,
-        FloatLiteral,
-        StringLiteral,
-        BoolLiteral,
-        Operator,
-        Separator,
-        EndOfFile,
-        Error
-    };
+enum class TokenType {
+    Identifier,
+    Keyword,
+    IntLiteral,
+    FloatLiteral,
+    StringLiteral,
+    BoolLiteral,
+    Operator,
+    Separator,
+    EndOfFile,
+    Error
+};
 
-    struct Position {
-        int line = 1;
-        int column = 1;
-    };
+struct Position {
+    int line = 1;
+    int column = 1;
+};
 
-    struct Token {
-        TokenType type;
-        std::string lexeme;
-        Position pos;
-    };
+struct Token {
+    TokenType type = TokenType::Error;
+    std::string lexeme;
+    Position pos{};
+};
 
-    class Lexer {
-    public:
-        explicit Lexer(std::string_view source, std::string filename = "<input>");
+class Lexer {
+public:
+    explicit Lexer(std::string_view source, std::string filename = "<input>");
 
-        Token nextToken();
-        void reset();
+    Token nextToken();
+    std::vector<Token> tokenize();
+    void reset();
 
-        const std::string& filename() const;
-        std::string formatError(const Token& token) const;
+    const std::string& filename() const;
+    std::string formatError(const Token& token) const;
 
-    private:
-        std::string source;
-        std::string file;
-        std::size_t index = 0;
-        int line = 1;
-        int column = 1;
+private:
+    std::string source_;
+    std::string file_;
+    std::size_t index_ = 0;
+    int line_ = 1;
+    int column_ = 1;
 
-        char peek() const;
-        char peekNext() const;
-        char advance();
-        bool match(char expected);
-        bool isAtEnd() const;
+    char peek() const;
+    char peekNext() const;
+    char advance();
+    bool match(char expected);
+    bool isAtEnd() const;
 
-        Token makeToken(TokenType type, const std::string& lexeme, Position startPos) const;
-        Token errorToken(const std::string& message, Position startPos) const;
+    Token makeToken(TokenType type, const std::string& lexeme, Position startPos) const;
+    Token errorToken(const std::string& message, Position startPos) const;
 
-        Token identifierOrKeyword(Position startPos);
-        Token number(Position startPos);
-        Token string(Position startPos);
+    Token identifierOrKeyword(Position startPos);
+    Token number(Position startPos);
+    Token stringLiteral(Position startPos);
 
-        void skipWhitespace();
-        void skipComment();
-        void skipWhitespaceAndComments();
+    void skipWhitespace();
+    void skipComment();
+    void skipWhitespaceAndComments();
 
-        static bool isAlpha(char c);
-        static bool isDigit(char c);
-        static bool isAlphaNumeric(char c);
-    };
+    static bool isAlpha(char c);
+    static bool isDigit(char c);
+    static bool isAlphaNumeric(char c);
+};
 
-    std::string tokenTypeToString(TokenType type);
+std::string tokenTypeToString(TokenType type);
 
-}
+} // namespace Lexer
