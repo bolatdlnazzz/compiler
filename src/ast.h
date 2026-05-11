@@ -1,16 +1,12 @@
 #pragma once
+
+#include "lexer.h"
+
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
-
-namespace Lexer {
-    struct Position {
-        int line;
-        int column;
-    };
-}
 
 namespace AST {
 
@@ -30,7 +26,7 @@ struct TypeExpr : Node {
 };
 
 struct Expr : Node {
-    // Заполняется на семантической фазе.
+    // Заполняется на семантической фазе каноническим именем типа.
     std::optional<std::string> semanticType;
     virtual ~Expr() = default;
 };
@@ -62,7 +58,7 @@ struct ArrayType final : TypeExpr {
 };
 
 struct NameExpr final : Expr {
-    std::vector<std::string> path;   // x / Geometry::manhattan
+    std::vector<std::string> path;   // x / Geometry::manhattan / print
 };
 
 struct IntLiteralExpr final : Expr {
@@ -78,6 +74,7 @@ struct BoolLiteralExpr final : Expr {
 };
 
 struct StringLiteralExpr final : Expr {
+    // Декодированное значение без внешних кавычек.
     std::string value;
 };
 
