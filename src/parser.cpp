@@ -58,7 +58,8 @@ void Parser::errorAt(const Lexer::Token& tok, std::string_view message) {
 
 void Parser::synchronizeTopLevel() {
     while (!isAtEnd()) {
-        if (check(Lexer::TokenType::Keyword, "namespace") ||
+        if (check(Lexer::TokenType::Keyword, "module") ||
+            check(Lexer::TokenType::Keyword, "namespace") ||
             check(Lexer::TokenType::Keyword, "type") ||
             check(Lexer::TokenType::Keyword, "struct") ||
             check(Lexer::TokenType::Keyword, "fn")) {
@@ -117,6 +118,15 @@ std::vector<std::string> Parser::parseNamePath() {
     return path;
 }
 
+std::vector<std::string> Parser::parseModuleNamePath() {
+    std::vector<std::string> path;
+    path.push_back(expectIdentifierLike("ожидалось имя модуля"));
+    while (match(Lexer::TokenType::Operator, "::")) {
+        path.push_back(expectIdentifierLike("ожидалось имя модуля после '::'"));
+    }
+    return path;
+}
+
 AST::SourceSpan Parser::spanFrom(const Lexer::Token& first, const Lexer::Token& last) const {
     return AST::SourceSpan{fileName_, first.pos, last.pos};
 }
@@ -146,8 +156,16 @@ std::unique_ptr<AST::Module> Parser::parseModule() {
     auto module = std::make_unique<AST::Module>();
     const auto first = peek();
 
+    if (match(Lexer::TokenType::Keyword, "module")) {
+        module->namePath = parseModuleNamePath();
+        expect(Lexer::TokenType::Separator, ";", "ожидался ';' после объявления module");
+    }
+
     while (!isAtEnd()) {
         try {
+            if (check(Lexer::TokenType::Keyword, "module")) {
+                errorAt(peek(), "объявление module допустимо только в начале файла");
+            }
             module->decls.push_back(parseDeclaration());
         } catch (const ParseError&) {
             if (!options_.recoverErrors) break;

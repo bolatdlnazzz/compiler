@@ -60,6 +60,7 @@ private:
     bool isTypeNameLike(const Lexer::Token& tok) const;
     std::string expectIdentifierLike(std::string_view message);
     std::vector<std::string> parseNamePath();
+    std::vector<std::string> parseModuleNamePath();
     AST::SourceSpan spanFrom(const Lexer::Token& first, const Lexer::Token& last) const;
     static std::string decodeStringLiteral(std::string_view lexeme);
 
