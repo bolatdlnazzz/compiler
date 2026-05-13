@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/astra.dir/lexer.cpp.o CMakeFiles/astra.dir/parser.cpp.o CMakeFiles/astra.dir/semantic.cpp.o CMakeFiles/astra.dir/main.cpp.o -o astra 

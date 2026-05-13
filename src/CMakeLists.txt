@@ -1,10 +1,7 @@
 set(SOURCES
-    lexer/Lexer.cpp
-    parser/Parser.cpp
-    semantic/Semantic.cpp
-    ir/IR.cpp
-    codegen/Codegen.cpp
-    runtime/Runtime.cpp
+    lexer.cpp
+    parser.cpp
+    semantic.cpp
     main.cpp
 )
 

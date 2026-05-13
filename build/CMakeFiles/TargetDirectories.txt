@@ -1,0 +1,8 @@
+/home/dilya/VSCode/compiler/build/CMakeFiles/run.dir
+/home/dilya/VSCode/compiler/build/CMakeFiles/debug.dir
+/home/dilya/VSCode/compiler/build/CMakeFiles/clean-all.dir
+/home/dilya/VSCode/compiler/build/CMakeFiles/edit_cache.dir
+/home/dilya/VSCode/compiler/build/CMakeFiles/rebuild_cache.dir
+/home/dilya/VSCode/compiler/build/src/CMakeFiles/astra.dir
+/home/dilya/VSCode/compiler/build/src/CMakeFiles/edit_cache.dir
+/home/dilya/VSCode/compiler/build/src/CMakeFiles/rebuild_cache.dir
