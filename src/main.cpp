@@ -46,11 +46,14 @@ int main(int argc, char* argv[]) {
         for (const auto& diag : parser.diagnostics()) {
             std::cerr << "  " << diag.message << std::endl;
         }
-    } else {
-        std::cout << "Parse OK" << std::endl;
+
+        std::cout << "\nCompilation failed!" << std::endl;
+        return 1;
     }
 
-    // Семантический анализ
+    std::cout << "Parse OK" << std::endl;
+
+    // Семантический анализ запускаем только если парсер прошёл успешно
     std::cout << "\n=== SEMANTIC ===" << std::endl;
     Semantic::Analyzer semantic(argv[1]);
     bool sem_ok = semantic.analyze(*ast);
