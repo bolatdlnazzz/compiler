@@ -45,6 +45,9 @@ using StmtPtr = std::unique_ptr<Stmt>;
 using DeclPtr = std::unique_ptr<Decl>;
 
 struct Module final : Node {
+    // Явное имя модуля из заголовка `module Name;`.
+    // Если пусто, файл всё равно считается модулем по имени исходного файла.
+    std::vector<std::string> namePath;
     std::vector<DeclPtr> decls;
 };
 
