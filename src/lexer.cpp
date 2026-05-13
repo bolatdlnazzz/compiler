@@ -206,7 +206,7 @@ Token Lexer::identifierOrKeyword(Position startPos) {
     }
 
     static const std::unordered_set<std::string> keywords = {
-        "namespace", "type", "struct", "fn", "let", "var",
+        "module", "namespace", "type", "struct", "fn", "let", "var",
         "if", "else", "while", "break", "continue", "return",
         "as", "unit", "print", "input", "exit", "panic"
     };
