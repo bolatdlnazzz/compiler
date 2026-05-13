@@ -1,0 +1,8 @@
+fn foo() -> int32 {
+    let x: int32 = "string";
+    return 0;
+}
+
+fn main() -> int32 {
+    return 0;
+}
