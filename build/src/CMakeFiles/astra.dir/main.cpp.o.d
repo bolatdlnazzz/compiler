@@ -158,12 +158,12 @@ src/CMakeFiles/astra.dir/main.cpp.o: \
  /usr/include/x86_64-linux-gnu/c++/13/bits/basic_file.h \
  /usr/include/x86_64-linux-gnu/c++/13/bits/c++io.h \
  /usr/include/c++/13/bits/fstream.tcc /usr/include/c++/13/sstream \
- /usr/include/c++/13/bits/sstream.tcc \
- /home/dilya/VSCode/compiler/src/lexer.h /usr/include/c++/13/vector \
+ /usr/include/c++/13/bits/sstream.tcc /usr/include/c++/13/vector \
  /usr/include/c++/13/bits/stl_uninitialized.h \
  /usr/include/c++/13/bits/stl_vector.h \
  /usr/include/c++/13/bits/stl_bvector.h \
  /usr/include/c++/13/bits/vector.tcc \
+ /home/dilya/VSCode/compiler/src/lexer.h \
  /home/dilya/VSCode/compiler/src/parser.h \
  /home/dilya/VSCode/compiler/src/ast.h /usr/include/c++/13/cstdint \
  /usr/lib/gcc/x86_64-linux-gnu/13/include/stdint.h /usr/include/stdint.h \
