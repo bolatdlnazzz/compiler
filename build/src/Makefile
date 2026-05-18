@@ -130,6 +130,54 @@ astra/fast:
 	cd /home/dilya/VSCode/compiler/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/astra.dir/build.make src/CMakeFiles/astra.dir/build
 .PHONY : astra/fast
 
+ast_dump.o: ast_dump.cpp.o
+.PHONY : ast_dump.o
+
+# target to build an object file
+ast_dump.cpp.o:
+	cd /home/dilya/VSCode/compiler/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/astra.dir/build.make src/CMakeFiles/astra.dir/ast_dump.cpp.o
+.PHONY : ast_dump.cpp.o
+
+ast_dump.i: ast_dump.cpp.i
+.PHONY : ast_dump.i
+
+# target to preprocess a source file
+ast_dump.cpp.i:
+	cd /home/dilya/VSCode/compiler/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/astra.dir/build.make src/CMakeFiles/astra.dir/ast_dump.cpp.i
+.PHONY : ast_dump.cpp.i
+
+ast_dump.s: ast_dump.cpp.s
+.PHONY : ast_dump.s
+
+# target to generate assembly for a file
+ast_dump.cpp.s:
+	cd /home/dilya/VSCode/compiler/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/astra.dir/build.make src/CMakeFiles/astra.dir/ast_dump.cpp.s
+.PHONY : ast_dump.cpp.s
+
+codegen.o: codegen.cpp.o
+.PHONY : codegen.o
+
+# target to build an object file
+codegen.cpp.o:
+	cd /home/dilya/VSCode/compiler/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/astra.dir/build.make src/CMakeFiles/astra.dir/codegen.cpp.o
+.PHONY : codegen.cpp.o
+
+codegen.i: codegen.cpp.i
+.PHONY : codegen.i
+
+# target to preprocess a source file
+codegen.cpp.i:
+	cd /home/dilya/VSCode/compiler/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/astra.dir/build.make src/CMakeFiles/astra.dir/codegen.cpp.i
+.PHONY : codegen.cpp.i
+
+codegen.s: codegen.cpp.s
+.PHONY : codegen.s
+
+# target to generate assembly for a file
+codegen.cpp.s:
+	cd /home/dilya/VSCode/compiler/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/astra.dir/build.make src/CMakeFiles/astra.dir/codegen.cpp.s
+.PHONY : codegen.cpp.s
+
 lexer.o: lexer.cpp.o
 .PHONY : lexer.o
 
@@ -235,6 +283,12 @@ help:
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
 	@echo "... astra"
+	@echo "... ast_dump.o"
+	@echo "... ast_dump.i"
+	@echo "... ast_dump.s"
+	@echo "... codegen.o"
+	@echo "... codegen.i"
+	@echo "... codegen.s"
 	@echo "... lexer.o"
 	@echo "... lexer.i"
 	@echo "... lexer.s"

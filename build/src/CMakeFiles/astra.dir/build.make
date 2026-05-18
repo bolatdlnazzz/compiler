@@ -111,10 +111,38 @@ src/CMakeFiles/astra.dir/semantic.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/astra.dir/semantic.cpp.s"
 	cd /home/dilya/VSCode/compiler/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/dilya/VSCode/compiler/src/semantic.cpp -o CMakeFiles/astra.dir/semantic.cpp.s
 
+src/CMakeFiles/astra.dir/ast_dump.cpp.o: src/CMakeFiles/astra.dir/flags.make
+src/CMakeFiles/astra.dir/ast_dump.cpp.o: /home/dilya/VSCode/compiler/src/ast_dump.cpp
+src/CMakeFiles/astra.dir/ast_dump.cpp.o: src/CMakeFiles/astra.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/dilya/VSCode/compiler/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object src/CMakeFiles/astra.dir/ast_dump.cpp.o"
+	cd /home/dilya/VSCode/compiler/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT src/CMakeFiles/astra.dir/ast_dump.cpp.o -MF CMakeFiles/astra.dir/ast_dump.cpp.o.d -o CMakeFiles/astra.dir/ast_dump.cpp.o -c /home/dilya/VSCode/compiler/src/ast_dump.cpp
+
+src/CMakeFiles/astra.dir/ast_dump.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/astra.dir/ast_dump.cpp.i"
+	cd /home/dilya/VSCode/compiler/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/dilya/VSCode/compiler/src/ast_dump.cpp > CMakeFiles/astra.dir/ast_dump.cpp.i
+
+src/CMakeFiles/astra.dir/ast_dump.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/astra.dir/ast_dump.cpp.s"
+	cd /home/dilya/VSCode/compiler/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/dilya/VSCode/compiler/src/ast_dump.cpp -o CMakeFiles/astra.dir/ast_dump.cpp.s
+
+src/CMakeFiles/astra.dir/codegen.cpp.o: src/CMakeFiles/astra.dir/flags.make
+src/CMakeFiles/astra.dir/codegen.cpp.o: /home/dilya/VSCode/compiler/src/codegen.cpp
+src/CMakeFiles/astra.dir/codegen.cpp.o: src/CMakeFiles/astra.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/dilya/VSCode/compiler/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object src/CMakeFiles/astra.dir/codegen.cpp.o"
+	cd /home/dilya/VSCode/compiler/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT src/CMakeFiles/astra.dir/codegen.cpp.o -MF CMakeFiles/astra.dir/codegen.cpp.o.d -o CMakeFiles/astra.dir/codegen.cpp.o -c /home/dilya/VSCode/compiler/src/codegen.cpp
+
+src/CMakeFiles/astra.dir/codegen.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/astra.dir/codegen.cpp.i"
+	cd /home/dilya/VSCode/compiler/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/dilya/VSCode/compiler/src/codegen.cpp > CMakeFiles/astra.dir/codegen.cpp.i
+
+src/CMakeFiles/astra.dir/codegen.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/astra.dir/codegen.cpp.s"
+	cd /home/dilya/VSCode/compiler/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/dilya/VSCode/compiler/src/codegen.cpp -o CMakeFiles/astra.dir/codegen.cpp.s
+
 src/CMakeFiles/astra.dir/main.cpp.o: src/CMakeFiles/astra.dir/flags.make
 src/CMakeFiles/astra.dir/main.cpp.o: /home/dilya/VSCode/compiler/src/main.cpp
 src/CMakeFiles/astra.dir/main.cpp.o: src/CMakeFiles/astra.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/dilya/VSCode/compiler/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object src/CMakeFiles/astra.dir/main.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/dilya/VSCode/compiler/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object src/CMakeFiles/astra.dir/main.cpp.o"
 	cd /home/dilya/VSCode/compiler/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT src/CMakeFiles/astra.dir/main.cpp.o -MF CMakeFiles/astra.dir/main.cpp.o.d -o CMakeFiles/astra.dir/main.cpp.o -c /home/dilya/VSCode/compiler/src/main.cpp
 
 src/CMakeFiles/astra.dir/main.cpp.i: cmake_force
@@ -130,6 +158,8 @@ astra_OBJECTS = \
 "CMakeFiles/astra.dir/lexer.cpp.o" \
 "CMakeFiles/astra.dir/parser.cpp.o" \
 "CMakeFiles/astra.dir/semantic.cpp.o" \
+"CMakeFiles/astra.dir/ast_dump.cpp.o" \
+"CMakeFiles/astra.dir/codegen.cpp.o" \
 "CMakeFiles/astra.dir/main.cpp.o"
 
 # External object files for target astra
@@ -138,10 +168,12 @@ astra_EXTERNAL_OBJECTS =
 src/astra: src/CMakeFiles/astra.dir/lexer.cpp.o
 src/astra: src/CMakeFiles/astra.dir/parser.cpp.o
 src/astra: src/CMakeFiles/astra.dir/semantic.cpp.o
+src/astra: src/CMakeFiles/astra.dir/ast_dump.cpp.o
+src/astra: src/CMakeFiles/astra.dir/codegen.cpp.o
 src/astra: src/CMakeFiles/astra.dir/main.cpp.o
 src/astra: src/CMakeFiles/astra.dir/build.make
 src/astra: src/CMakeFiles/astra.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/dilya/VSCode/compiler/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Linking CXX executable astra"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/dilya/VSCode/compiler/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Linking CXX executable astra"
 	cd /home/dilya/VSCode/compiler/build/src && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/astra.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.

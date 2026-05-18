@@ -104,7 +104,7 @@ CMakeFiles/run.dir/all: src/CMakeFiles/astra.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/run.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/dilya/VSCode/compiler/build/CMakeFiles 5
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dilya/VSCode/compiler/build/CMakeFiles 7
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/run.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /home/dilya/VSCode/compiler/build/CMakeFiles 0
 .PHONY : CMakeFiles/run.dir/rule
@@ -130,7 +130,7 @@ CMakeFiles/debug.dir/all: src/CMakeFiles/astra.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/debug.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/dilya/VSCode/compiler/build/CMakeFiles 5
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dilya/VSCode/compiler/build/CMakeFiles 7
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/debug.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /home/dilya/VSCode/compiler/build/CMakeFiles 0
 .PHONY : CMakeFiles/debug.dir/rule
@@ -177,12 +177,12 @@ CMakeFiles/clean-all.dir/clean:
 src/CMakeFiles/astra.dir/all:
 	$(MAKE) $(MAKESILENT) -f src/CMakeFiles/astra.dir/build.make src/CMakeFiles/astra.dir/depend
 	$(MAKE) $(MAKESILENT) -f src/CMakeFiles/astra.dir/build.make src/CMakeFiles/astra.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/dilya/VSCode/compiler/build/CMakeFiles --progress-num=1,2,3,4,5 "Built target astra"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/dilya/VSCode/compiler/build/CMakeFiles --progress-num=1,2,3,4,5,6,7 "Built target astra"
 .PHONY : src/CMakeFiles/astra.dir/all
 
 # Build rule for subdir invocation for target.
 src/CMakeFiles/astra.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/dilya/VSCode/compiler/build/CMakeFiles 5
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dilya/VSCode/compiler/build/CMakeFiles 7
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/CMakeFiles/astra.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /home/dilya/VSCode/compiler/build/CMakeFiles 0
 .PHONY : src/CMakeFiles/astra.dir/rule

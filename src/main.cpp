@@ -1,98 +1,255 @@
-#include <iostream>
-#include <fstream>
-#include <sstream>
-#include <string>
-#include <vector>
+#include "ast_dump.h"
+#include "codegen.h"
 #include "lexer.h"
 #include "parser.h"
 #include "semantic.h"
 
-static std::string joinPath(const std::vector<std::string>& path) {
-    std::string result;
-    for (const auto& part : path) {
-        if (!result.empty()) result += "::";
-        result += part;
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#ifndef ASTRA_RUNTIME_C_PATH
+#define ASTRA_RUNTIME_C_PATH "runtime.c"
+#endif
+
+namespace {
+
+struct CliOptions {
+    std::string sourceFile;
+    std::string outputFile;
+    bool dumpTokens = false;
+    bool dumpAst = false;
+    bool emitAsmOnly = false;
+};
+
+void printUsage(const char* argv0) {
+    std::cerr
+        << "Usage: " << argv0
+        << " <source_file> [-o <output_file>] [--dump-tokens] [--dump-ast] [--emit-asm]\n";
+}
+
+std::string defaultOutputName(const std::string& sourceFile) {
+    std::filesystem::path path(sourceFile);
+    std::string stem = path.stem().string();
+
+    if (stem.empty()) {
+        return "a.out";
     }
+
+    return stem;
+}
+
+bool parseArgs(int argc, char* argv[], CliOptions& options) {
+    if (argc < 2) {
+        return false;
+    }
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+
+        if (arg == "--dump-tokens") {
+            options.dumpTokens = true;
+        } else if (arg == "--dump-ast") {
+            options.dumpAst = true;
+        } else if (arg == "--emit-asm") {
+            options.emitAsmOnly = true;
+        } else if (arg == "-o") {
+            if (i + 1 >= argc) {
+                return false;
+            }
+
+            options.outputFile = argv[++i];
+        } else if (!arg.empty() && arg[0] == '-') {
+            return false;
+        } else if (options.sourceFile.empty()) {
+            options.sourceFile = arg;
+        } else {
+            return false;
+        }
+    }
+
+    if (options.sourceFile.empty()) {
+        return false;
+    }
+
+    if (options.outputFile.empty()) {
+        options.outputFile = defaultOutputName(options.sourceFile);
+    }
+
+    return true;
+}
+
+bool readFile(const std::string& path, std::string& outSource) {
+    std::ifstream file(path);
+
+    if (!file.is_open()) {
+        return false;
+    }
+
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+    outSource = buffer.str();
+
+    return true;
+}
+
+void dumpTokens(const std::vector<Lexer::Token>& tokens) {
+    std::cout << "=== TOKENS ===\n";
+
+    for (const auto& token : tokens) {
+        std::cout << token.pos.line << ":" << token.pos.column << "  "
+                  << Lexer::tokenTypeToString(token.type) << "  "
+                  << token.lexeme << "\n";
+    }
+}
+
+std::string quoteShellArg(const std::string& value) {
+    std::string result = "\"";
+
+    for (char c : value) {
+        if (c == '"' || c == '\\') {
+            result += '\\';
+        }
+
+        result += c;
+    }
+
+    result += "\"";
     return result;
 }
 
+bool runCommand(const std::string& command) {
+    int code = std::system(command.c_str());
+    return code == 0;
+}
+
+} // namespace
+
 int main(int argc, char* argv[]) {
-    if (argc != 2) {
-        std::cerr << "Usage: " << argv[0] << " <source_file>" << std::endl;
+    CliOptions options;
+
+    if (!parseArgs(argc, argv, options)) {
+        printUsage(argv[0]);
         return 1;
     }
 
-    // Читаем исходный файл
-    std::ifstream file(argv[1]);
-    if (!file.is_open()) {
-        std::cerr << "Error: Cannot open file " << argv[1] << std::endl;
+    std::string source;
+
+    if (!readFile(options.sourceFile, source)) {
+        std::cerr << options.sourceFile
+                  << ":1:1: error: cannot open source file\n";
         return 1;
     }
 
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    std::string source = buffer.str();
-    file.close();
+    // =========================
+    // Lexer
+    // =========================
 
-    // Лексический анализ
-    Lexer::Lexer lexer(source, argv[1]);
+    Lexer::Lexer lexer(source, options.sourceFile);
     auto tokens = lexer.tokenize();
 
     for (const auto& token : tokens) {
         if (token.type == Lexer::TokenType::Error) {
-            std::cerr << lexer.formatError(token) << std::endl;
+            std::cerr << lexer.formatError(token) << "\n";
             return 1;
         }
     }
-    
-    std::cout << "=== LEXER ===" << std::endl;
-    std::cout << "Tokens: " << tokens.size() << std::endl;
-    for (const auto& token : tokens) {
-        if (token.type != Lexer::TokenType::EndOfFile) {
-            std::cout << "  [" << static_cast<int>(token.type) << "] " 
-                      << token.lexeme << std::endl;
-        }
+
+    if (options.dumpTokens) {
+        dumpTokens(tokens);
+        return 0;
     }
 
-    // Синтаксический анализ
-    std::cout << "\n=== PARSER ===" << std::endl;
-    Parser::Parser parser(tokens, argv[1]);
+    // =========================
+    // Parser
+    // =========================
+
+    Parser::Parser parser(tokens, options.sourceFile);
     auto ast = parser.parseModule();
-    if (!ast->namePath.empty()) {
-        std::cout << "Module: " << joinPath(ast->namePath) << std::endl;
-    }
-    
+
     if (!parser.diagnostics().empty()) {
-        std::cerr << "Parse errors: " << parser.diagnostics().size() << std::endl;
-        for (const auto& diag : parser.diagnostics()) {
-            std::cerr << "  " << diag.message << std::endl;
+        for (const auto& diagnostic : parser.diagnostics()) {
+            std::cerr << Parser::formatDiagnostic(diagnostic) << "\n";
         }
-        
-        std::cout << "\nCompilation failed!" << std::endl;
+
         return 1;
     }
 
-    std::cout << "Parse OK" << std::endl;
-
-    // Семантический анализ
-    std::cout << "\n=== SEMANTIC ===" << std::endl;
-    Semantic::Analyzer semantic(argv[1]);
-    bool sem_ok = semantic.analyze(*ast);
-    
-    if (!semantic.diagnostics().empty()) {
-        std::cerr << "Semantic errors: " << semantic.diagnostics().size() << std::endl;
-        for (const auto& diag : semantic.diagnostics()) {
-            std::cerr << "  " << diag.message << std::endl;
-        }
-    } else {
-        std::cout << "Semantic OK" << std::endl;
+    if (options.dumpAst) {
+        ASTDump::dumpModule(*ast, std::cout);
+        return 0;
     }
 
-    if (sem_ok && parser.diagnostics().empty()) {
-        std::cout << "\nCompilation successful!" << std::endl;
-    } else {
-        std::cout << "\nCompilation failed!" << std::endl;
+    // =========================
+    // Semantic analyzer
+    // =========================
+
+    Semantic::Analyzer semantic(options.sourceFile);
+    bool semanticOk = semantic.analyze(*ast);
+
+    if (!semanticOk) {
+        for (const auto& diagnostic : semantic.diagnostics()) {
+            std::cerr << Semantic::formatDiagnostic(diagnostic) << "\n";
+        }
+
         return 1;
     }
+
+    // =========================
+    // Codegen
+    // =========================
+
+    std::string asmPath;
+
+    if (options.emitAsmOnly) {
+        asmPath = options.outputFile;
+    } else {
+        asmPath = options.outputFile + ".asm";
+    }
+
+    Codegen::Generator codegen(options.sourceFile);
+
+    if (!codegen.generate(*ast, asmPath)) {
+        for (const auto& diagnostic : codegen.diagnostics()) {
+            std::cerr << Codegen::formatDiagnostic(diagnostic) << "\n";
+        }
+
+        return 1;
+    }
+
+    if (options.emitAsmOnly) {
+        std::cout << "Generated asm: " << asmPath << "\n";
+        return 0;
+    }
+
+    const std::string objectPath = options.outputFile + ".o";
+
+    const std::string nasmCommand =
+        "nasm -felf64 " + quoteShellArg(asmPath) +
+        " -o " + quoteShellArg(objectPath);
+
+    if (!runCommand(nasmCommand)) {
+        std::cerr << options.sourceFile
+                  << ":1:1: error: nasm failed. Install nasm or use --emit-asm\n";
+        return 1;
+    }
+
+    const std::string linkCommand =
+        "cc -no-pie " +
+        quoteShellArg(objectPath) + " " +
+        quoteShellArg(ASTRA_RUNTIME_C_PATH) +
+        " -o " + quoteShellArg(options.outputFile);
+
+    if (!runCommand(linkCommand)) {
+        std::cerr << options.sourceFile
+                  << ":1:1: error: linker failed while creating executable\n";
+        return 1;
+    }
+
+    std::cout << "Compilation successful: " << options.outputFile << "\n";
     return 0;
 }

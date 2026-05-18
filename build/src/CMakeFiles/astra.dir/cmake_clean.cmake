@@ -1,4 +1,8 @@
 file(REMOVE_RECURSE
+  "CMakeFiles/astra.dir/ast_dump.cpp.o"
+  "CMakeFiles/astra.dir/ast_dump.cpp.o.d"
+  "CMakeFiles/astra.dir/codegen.cpp.o"
+  "CMakeFiles/astra.dir/codegen.cpp.o.d"
   "CMakeFiles/astra.dir/lexer.cpp.o"
   "CMakeFiles/astra.dir/lexer.cpp.o.d"
   "CMakeFiles/astra.dir/main.cpp.o"

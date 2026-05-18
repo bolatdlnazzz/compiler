@@ -8,6 +8,8 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
+  "/home/dilya/VSCode/compiler/src/ast_dump.cpp" "src/CMakeFiles/astra.dir/ast_dump.cpp.o" "gcc" "src/CMakeFiles/astra.dir/ast_dump.cpp.o.d"
+  "/home/dilya/VSCode/compiler/src/codegen.cpp" "src/CMakeFiles/astra.dir/codegen.cpp.o" "gcc" "src/CMakeFiles/astra.dir/codegen.cpp.o.d"
   "/home/dilya/VSCode/compiler/src/lexer.cpp" "src/CMakeFiles/astra.dir/lexer.cpp.o" "gcc" "src/CMakeFiles/astra.dir/lexer.cpp.o.d"
   "/home/dilya/VSCode/compiler/src/main.cpp" "src/CMakeFiles/astra.dir/main.cpp.o" "gcc" "src/CMakeFiles/astra.dir/main.cpp.o.d"
   "/home/dilya/VSCode/compiler/src/parser.cpp" "src/CMakeFiles/astra.dir/parser.cpp.o" "gcc" "src/CMakeFiles/astra.dir/parser.cpp.o.d"
