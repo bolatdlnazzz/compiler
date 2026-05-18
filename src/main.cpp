@@ -1,9 +1,20 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <string>
+#include <vector>
 #include "lexer.h"
 #include "parser.h"
 #include "semantic.h"
+
+static std::string joinPath(const std::vector<std::string>& path) {
+    std::string result;
+    for (const auto& part : path) {
+        if (!result.empty()) result += "::";
+        result += part;
+    }
+    return result;
+}
 
 int main(int argc, char* argv[]) {
     if (argc != 2) {
@@ -26,6 +37,13 @@ int main(int argc, char* argv[]) {
     // Лексический анализ
     Lexer::Lexer lexer(source, argv[1]);
     auto tokens = lexer.tokenize();
+
+    for (const auto& token : tokens) {
+        if (token.type == Lexer::TokenType::Error) {
+            std::cerr << lexer.formatError(token) << std::endl;
+            return 1;
+        }
+    }
     
     std::cout << "=== LEXER ===" << std::endl;
     std::cout << "Tokens: " << tokens.size() << std::endl;
@@ -40,20 +58,23 @@ int main(int argc, char* argv[]) {
     std::cout << "\n=== PARSER ===" << std::endl;
     Parser::Parser parser(tokens, argv[1]);
     auto ast = parser.parseModule();
+    if (!ast->namePath.empty()) {
+        std::cout << "Module: " << joinPath(ast->namePath) << std::endl;
+    }
     
     if (!parser.diagnostics().empty()) {
         std::cerr << "Parse errors: " << parser.diagnostics().size() << std::endl;
         for (const auto& diag : parser.diagnostics()) {
             std::cerr << "  " << diag.message << std::endl;
         }
-
+        
         std::cout << "\nCompilation failed!" << std::endl;
         return 1;
     }
 
     std::cout << "Parse OK" << std::endl;
 
-    // Семантический анализ запускаем только если парсер прошёл успешно
+    // Семантический анализ
     std::cout << "\n=== SEMANTIC ===" << std::endl;
     Semantic::Analyzer semantic(argv[1]);
     bool sem_ok = semantic.analyze(*ast);
