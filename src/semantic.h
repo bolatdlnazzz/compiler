@@ -116,12 +116,14 @@ private:
     std::vector<Diagnostic> diagnostics_;
     std::vector<std::unique_ptr<Scope>> ownedScopes_;
     Scope* rootScope_ = nullptr;
+    Scope* moduleScope_ = nullptr;
     Scope* currentScope_ = nullptr;
     std::vector<std::string> namespaceStack_;
     Type currentReturnType_ = Type::unit();
     int loopDepth_ = 0;
 
     Scope* makeScope(Scope* parent, bool isNamespace, std::string qualifiedName = {});
+    Scope* ensureNamespace(Scope& scope, const std::string& name, const AST::Node& node);
     std::string qualify(std::string_view name) const;
     std::string joinPath(const std::vector<std::string>& path) const;
 

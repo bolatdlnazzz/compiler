@@ -104,6 +104,26 @@ Analyzer::Scope* Analyzer::makeScope(Scope* parent, bool isNamespace, std::strin
     return raw;
 }
 
+Analyzer::Scope* Analyzer::ensureNamespace(Scope& scope, const std::string& name, const AST::Node& node) {
+    if (Symbol* existing = lookupLocal(scope, name)) {
+        if (existing->kind == SymbolKind::Namespace && existing->namespaceScope) {
+            return existing->namespaceScope;
+        }
+        addDiagnostic(node, "имя модуля '" + name + "' конфликтует с существующим объявлением");
+        return &scope;
+    }
+
+    std::string qualifiedName = scope.qualifiedName.empty() ? name : scope.qualifiedName + "::" + name;
+    Scope* nsScope = makeScope(&scope, true, qualifiedName);
+
+    Symbol sym;
+    sym.kind = SymbolKind::Namespace;
+    sym.name = name;
+    sym.namespaceScope = nsScope;
+    scope.symbols.emplace(name, std::move(sym));
+    return nsScope;
+}
+
 std::string Analyzer::qualify(std::string_view name) const {
     if (namespaceStack_.empty()) return std::string(name);
     std::string result;
@@ -141,16 +161,28 @@ bool Analyzer::analyze(AST::Module& module) {
     loopDepth_ = 0;
 
     rootScope_ = makeScope(nullptr, true, "");
+    moduleScope_ = rootScope_;
     currentScope_ = rootScope_;
     installBuiltins();
+
+    if (!module.namePath.empty()) {
+        Scope* scope = rootScope_;
+        for (const auto& part : module.namePath) {
+            scope = ensureNamespace(*scope, part, module);
+            namespaceStack_.push_back(part);
+        }
+        moduleScope_ = scope;
+        currentScope_ = moduleScope_;
+    }
 
     for (auto& decl : module.decls) {
         analyzeDecl(*decl);
     }
 
-    auto* mainSym = lookupLocal(*rootScope_, "main");
+    Scope* entryScope = moduleScope_ ? moduleScope_ : rootScope_;
+    auto* mainSym = lookupLocal(*entryScope, "main");
     if (!mainSym || mainSym->kind != SymbolKind::Function || !mainSym->function) {
-        addDiagnostic(module, "отсутствует точка входа fn main() -> int32");
+        addDiagnostic(module, "отсутствует точка входа fn main() -> int32 в текущем модуле");
     } else {
         const auto& fn = *mainSym->function;
         if (!fn.paramTypes.empty() || fn.returnType != Type::integer("int32", 32, false)) {
