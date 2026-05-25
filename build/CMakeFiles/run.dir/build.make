@@ -67,7 +67,7 @@ include CMakeFiles/run.dir/compiler_depend.make
 include CMakeFiles/run.dir/progress.make
 
 CMakeFiles/run: src/astra
-	cd /home/dilya/VSCode/compiler && /home/dilya/VSCode/compiler/build/astra examples/basics/main.astra
+	cd /home/dilya/VSCode/compiler && /home/dilya/VSCode/compiler/build/src/astra /home/dilya/VSCode/compiler/examples/basics/main.astra
 
 run: CMakeFiles/run
 run: CMakeFiles/run.dir/build.make

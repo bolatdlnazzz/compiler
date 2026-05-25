@@ -6,6 +6,7 @@ namespace ASTDump {
 
 namespace {
 
+// Узлы печатаются рекурсивно, с отступом для вложенных частей.
 std::string ind(int n) { return std::string(static_cast<std::size_t>(n), ' '); }
 
 std::string join(const std::vector<std::string>& path) {

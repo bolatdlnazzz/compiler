@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Эти функции вызываются из сгенерированного кода.
 void astra_print_i32(int32_t value) { printf("%d\n", value); }
 void astra_print_i64(int64_t value) { printf("%lld\n", (long long)value); }
 void astra_print_u32(uint32_t value) { printf("%u\n", value); }
@@ -12,6 +13,7 @@ void astra_print_f64(double value) { printf("%g\n", value); }
 void astra_print_bool(int64_t value) { printf(value ? "true\n" : "false\n"); }
 void astra_print_string(const char* value) { printf("%s\n", value ? value : ""); }
 
+// Читаем строку из stdin и возвращаем выделенную в heap копию.
 char* astra_input_string(void) {
     char buffer[4096];
     if (!fgets(buffer, sizeof(buffer), stdin)) {
@@ -29,11 +31,13 @@ char* astra_input_string(void) {
 
 void astra_exit(int32_t code) { exit(code); }
 
+// panic и runtime-ошибки останавливают программу с сообщением.
 void astra_panic(const char* message) {
     fprintf(stderr, "runtime error: %s\n", message ? message : "panic");
     exit(1);
 }
 
+// Строковые операции используют обычные C-строки.
 char* astra_string_concat(const char* a, const char* b) {
     if (!a) a = "";
     if (!b) b = "";

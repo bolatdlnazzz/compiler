@@ -1,75 +1,97 @@
 #pragma once
 
+// ЛЕКСИЧЕСКИЙ АНАЛИЗАТОР (LEXER)
+// Лексер разбивает исходный текст на токены
+// Токен - это минимальная смысловая единица: слово, число, оператор, скобка
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <vector>
 
-namespace Lexer {
+namespace Lexer { //пространство имен
 
+// Типы токенов, которые может выдать лексер
 enum class TokenType {
-    Identifier,
-    Keyword,
-    IntLiteral,
-    FloatLiteral,
-    StringLiteral,
-    BoolLiteral,
-    Operator,
-    Separator,
-    EndOfFile,
-    Error
+    Identifier,        // имя переменной, функции, структуры, типа и так далее, то есть переменные, функции: x, foo, myVar
+    Keyword,           // зарезервированные слова: let, if, while, fn
+    IntLiteral,        // целые числа: 42, 0, 999
+    FloatLiteral,      // числа с плавающей точкой: 3.14, 0.5
+    StringLiteral,     // строковые литералы: строки: "hello", "world"
+    BoolLiteral,       // логические значения: true или false
+    Operator,          // это символ или последовательность символов, которые обозначают действие: +, -, *, /, ==, !=, &&, ||, etc.
+    Separator,         // Разделитель — это символ, который разделяет части программы: (), [], {}, :, ;, ,
+    EndOfFile,         // конец файла
+    Error              // ошибочный токен. возникает, когда лексер не может распознать последовательность символов как валидный токен. Например, если в коде есть символ, который не разрешён в языке, или если строковый литерал не закрыт.
 };
 
-struct Position {
-    int line = 1;
-    int column = 1;
+struct Position { // Позиция в исходном коде, нужен для сообщений об ошибках
+    int line = 1;      // номер строки (начиная с 1)
+    int column = 1;    // номер колонки (начиная с 1)
 };
 
-struct Token {
-    TokenType type = TokenType::Error;
-    std::string lexeme;
-    Position pos{};
+// Сам токен - объект, который хранит всю информацию о слове
+struct Token { // и сами токены - обьект, который хранит всю инфу о слове: тип, текст и позицию
+    TokenType type = TokenType::Error;  // какой это тип токена?
+    std::string lexeme;                 // текст токена (например, "42")
+    Position pos{};                     // где он находится в исходном коде
 };
 
+// Основной класс лексера: функция для красивого вывода типа токена.
 class Lexer {
-public:
+public: //доступные функции для пользователя
+    // Конструктор - инициализируем лексер с исходным кодом, он создает конструктор класса.
     explicit Lexer(std::string_view source, std::string filename = "<input>");
+    //explicit запрещает неявные преобразования. std::string_view source - это входной текст, который мы хотим проанализировать. std::string filename - имя файла для сообщений об ошибках (по умолчанию "<input>").
 
+    // возвращает один следующий токен, то есть Каждый вызов nextToken() продвигает лексер дальше по исходному тексту.
     Token nextToken();
+    
+    // Получить все токены сразу (удобнее). То есть вместо того, чтобы вручную много раз вызывать nextToken(), можно просто вызвать tokenize(), и он вернет вектор всех токенов в исходном тексте. Это может быть удобнее для последующей обработки, например, при построении AST.
     std::vector<Token> tokenize();
+    
+    // Сбросить состояние лексера в начало (для повторной обработки). Это удобно, если ты сначала хочешь вывести токены для отладки, а потом снова передать их парсеру.
     void reset();
 
-    const std::string& filename() const;
-    std::string formatError(const Token& token) const;
+    const std::string& filename() const; //возвращает имя файла, которое было передано в конструктор. Здесь не возвращается копия строки, а возвращается ссылка. const означает, что через эту ссылку нельзя изменить file_.
+    
+    // Форматировать ошибку красиво для вывода
+    std::string formatError(const Token& token) const; //Токен передаётся по ссылке, чтобы не копировать его. const означает, что функция не будет изменять токен.
 
-private:
-    std::string source_;
-    std::string file_;
-    std::size_t index_ = 0;
-    int line_ = 1;
-    int column_ = 1;
+private: //Всё, что находится в private, доступно только внутри класса Lexer.
+    std::string source_;      // Здесь хранится весь исходный код.
+    std::string file_;        // Здесь хранится имя файла: используется в сообщениях об ошибках.
+    std::size_t index_ = 0;   // текущий индекс в строке source_. std::size_t — это стандартный тип для индексов и размеров контейнеров.
+    int line_ = 1;            // текущая строка
+    int column_ = 1;          // текущая колонка
 
-    char peek() const;
-    char peekNext() const;
-    char advance();
-    bool match(char expected);
-    bool isAtEnd() const;
+    // Вспомогательные функции
+    char peek() const;        // посмотреть текущий символ (не продвигаться)
+    char peekNext() const;    // посмотреть следующий символ
+    char advance();           // прочитать текущий символ и продвинуться. Также он должен обновлять строку и колонку
+    bool match(char expected);  // проверить и прочитать символ. Проверяет, равен ли текущий символ ожидаемому. Если да — читает его и возвращает true. Если нет — ничего не делает и возвращает false.
+    bool isAtEnd() const;     // Проверяет, дошёл ли лексер до конца исходного кода.
 
-    Token makeToken(TokenType type, const std::string& lexeme, Position startPos) const;
-    Token errorToken(const std::string& message, Position startPos) const;
+    // Создание токенов
+    Token makeToken(TokenType type, const std::string& lexeme, Position startPos) const; //Создаёт обычный токен.
+    Token errorToken(const std::string& message, Position startPos) const; //Создаёт токен ошибки.
 
-    Token identifierOrKeyword(Position startPos);
-    Token number(Position startPos);
-    Token stringLiteral(Position startPos);
+    // Распознавание разных типов токенов
+    Token identifierOrKeyword(Position startPos);  // читает слова: "let", "x", "foo". Сначала лексер читает последовательность букв, цифр и _. Потом проверяет: это true или false? это ключевое слово? или это обычный идентификатор?
+    Token number(Position startPos);               // читает числа: "42", "3.14"
+    Token stringLiteral(Position startPos);        // читает строки: "hello"
 
-    void skipWhitespace();
-    void skipComment();
-    void skipWhitespaceAndComments();
+    // Пропуск ненужных символов
+    void skipWhitespace();           // пропустить пробелы, табуляции, переводы строк
+    void skipComment();              // пропустить однострочный комментарий (//)
+    void skipWhitespaceAndComments();  // пропустить оба вместе. Перед чтением каждого нового токена лексер должен вызвать этот метод.
 
-    static bool isAlpha(char c);
-    static bool isDigit(char c);
-    static bool isAlphaNumeric(char c);
+    // Проверка типов символов
+    static bool isAlpha(char c);      // буква или подчеркивание? нужна для идентификаторов и ключевых слов 
+    static bool isDigit(char c);      // цифра?
+    static bool isAlphaNumeric(char c);  // буква или цифра?
 };
 
+// Функция для красивого вывода типа токена
 std::string tokenTypeToString(TokenType type);
 
 } // namespace Lexer

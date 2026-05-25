@@ -1,42 +1,17 @@
 #include "semantic.h"
 
 #include <algorithm>
-#include <charconv>
-#include <limits>
-#include <memory>
 #include <sstream>
-#include <unordered_set>
 #include <utility>
 
 namespace Semantic {
 
-Type Type::error() {
-    Type t;
-    t.kind = Kind::Error;
-    t.name = "<error>";
-    return t;
-}
+// ─── Type ────────────────────────────────────────────────────────────────────
 
-Type Type::unit() {
-    Type t;
-    t.kind = Kind::Unit;
-    t.name = "unit";
-    return t;
-}
-
-Type Type::boolean() {
-    Type t;
-    t.kind = Kind::Bool;
-    t.name = "bool";
-    return t;
-}
-
-Type Type::string() {
-    Type t;
-    t.kind = Kind::String;
-    t.name = "string";
-    return t;
-}
+Type Type::error()   { Type t; t.kind = Kind::Error;  t.name = "<error>";  return t; }
+Type Type::unit()    { Type t; t.kind = Kind::Unit;   t.name = "unit";     return t; }
+Type Type::boolean() { Type t; t.kind = Kind::Bool;   t.name = "bool";     return t; }
+Type Type::string()  { Type t; t.kind = Kind::String; t.name = "string";   return t; }
 
 Type Type::integer(std::string name, int bits, bool isUnsigned) {
     Type t;
@@ -55,12 +30,11 @@ Type Type::floating(std::string name, int bits) {
 }
 
 Type Type::array(Type element, std::uint64_t size) {
-    auto ptr = std::make_shared<Type>(std::move(element));
     Type t;
     t.kind = Kind::Array;
-    t.elementType = ptr;
     t.arraySize = size;
-    t.name = "[" + ptr->toString() + "; " + std::to_string(size) + "]";
+    t.elementType = std::make_shared<Type>(std::move(element));
+    t.name = "[" + t.elementType->name + "; " + std::to_string(size) + "]";
     return t;
 }
 
@@ -74,23 +48,16 @@ Type Type::structure(std::string qualifiedName) {
 bool Type::operator==(const Type& other) const {
     if (kind != other.kind) return false;
     if (kind == Kind::Array) {
-        if (arraySize != other.arraySize) return false;
-        if (!elementType || !other.elementType) return false;
-        return *elementType == *other.elementType;
-    }
-    if (kind == Kind::Int || kind == Kind::UInt || kind == Kind::Float) {
-        return bits == other.bits && name == other.name;
+        return arraySize == other.arraySize &&
+               elementType && other.elementType &&
+               *elementType == *other.elementType;
     }
     return name == other.name;
 }
 
-std::string Type::toString() const {
-    if (kind == Kind::Array) {
-        const std::string elem = elementType ? elementType->toString() : "<error>";
-        return "[" + elem + "; " + std::to_string(arraySize) + "]";
-    }
-    return name;
-}
+std::string Type::toString() const { return name; }
+
+// ─── Analyzer ────────────────────────────────────────────────────────────────
 
 Analyzer::Analyzer(std::string fileName) : fileName_(std::move(fileName)) {}
 
@@ -105,212 +72,167 @@ Analyzer::Scope* Analyzer::makeScope(Scope* parent, bool isNamespace, std::strin
 }
 
 Analyzer::Scope* Analyzer::ensureNamespace(Scope& scope, const std::string& name, const AST::Node& node) {
-    if (Symbol* existing = lookupLocal(scope, name)) {
-        if (existing->kind == SymbolKind::Namespace && existing->namespaceScope) {
-            return existing->namespaceScope;
-        }
-        addDiagnostic(node, "имя модуля '" + name + "' конфликтует с существующим объявлением");
-        return &scope;
+    auto it = scope.symbols.find(name);
+    if (it != scope.symbols.end()) {
+        if (it->second.kind == SymbolKind::Namespace && it->second.namespaceScope)
+            return it->second.namespaceScope;
+        addDiagnostic(node, "'" + name + "' уже объявлен и не является пространством имён");
+        return makeScope(&scope, true, name);
     }
-
-    std::string qualifiedName = scope.qualifiedName.empty() ? name : scope.qualifiedName + "::" + name;
-    Scope* nsScope = makeScope(&scope, true, qualifiedName);
-
+    const std::string q = scope.qualifiedName.empty() ? name : scope.qualifiedName + "::" + name;
+    Scope* ns = makeScope(&scope, true, q);
     Symbol sym;
     sym.kind = SymbolKind::Namespace;
     sym.name = name;
-    sym.namespaceScope = nsScope;
-    scope.symbols.emplace(name, std::move(sym));
-    return nsScope;
+    sym.namespaceScope = ns;
+    scope.symbols[name] = std::move(sym);
+    return ns;
 }
 
 std::string Analyzer::qualify(std::string_view name) const {
     if (namespaceStack_.empty()) return std::string(name);
     std::string result;
-    for (const auto& ns : namespaceStack_) {
-        if (!result.empty()) result += "::";
-        result += ns;
-    }
-    result += "::";
+    for (const auto& part : namespaceStack_) { result += part; result += "::"; }
     result += name;
     return result;
 }
 
 std::string Analyzer::joinPath(const std::vector<std::string>& path) const {
-    std::string result;
-    for (const auto& p : path) {
-        if (!result.empty()) result += "::";
-        result += p;
-    }
-    return result;
+    std::string r;
+    for (const auto& p : path) { if (!r.empty()) r += "::"; r += p; }
+    return r;
 }
 
 void Analyzer::addDiagnostic(const AST::Node& node, std::string message) {
-    addDiagnostic(node.span.begin, std::move(message));
+    diagnostics_.push_back(Diagnostic{fileName_, node.span.begin, std::move(message)});
 }
 
 void Analyzer::addDiagnostic(Lexer::Position pos, std::string message) {
     diagnostics_.push_back(Diagnostic{fileName_, pos, std::move(message)});
 }
 
-bool Analyzer::analyze(AST::Module& module) {
-    diagnostics_.clear();
-    ownedScopes_.clear();
-    namespaceStack_.clear();
-    currentReturnType_ = Type::unit();
-    loopDepth_ = 0;
-
-    rootScope_ = makeScope(nullptr, true, "");
-    moduleScope_ = rootScope_;
-    currentScope_ = rootScope_;
-    installBuiltins();
-
-    if (!module.namePath.empty()) {
-        Scope* scope = rootScope_;
-        for (const auto& part : module.namePath) {
-            scope = ensureNamespace(*scope, part, module);
-            namespaceStack_.push_back(part);
-        }
-        moduleScope_ = scope;
-        currentScope_ = moduleScope_;
-    }
-
-    for (auto& decl : module.decls) {
-        analyzeDecl(*decl);
-    }
-
-    Scope* entryScope = moduleScope_ ? moduleScope_ : rootScope_;
-    auto* mainSym = lookupLocal(*entryScope, "main");
-    if (!mainSym || mainSym->kind != SymbolKind::Function || !mainSym->function) {
-        addDiagnostic(module, "отсутствует точка входа fn main() -> int32 в текущем модуле");
-    } else {
-        const auto& fn = *mainSym->function;
-        if (!fn.paramTypes.empty() || fn.returnType != Type::integer("int32", 32, false)) {
-            addDiagnostic(*fn.decl, "main должна иметь сигнатуру fn main() -> int32");
-        }
-    }
-
-    return diagnostics_.empty();
-}
-
-void Analyzer::installBuiltins() {
-    addBuiltinFunction("input", Type::string());
-    addBuiltinFunction("exit", Type::unit(), {Type::integer("int32", 32, false)});
-    addBuiltinFunction("panic", Type::unit(), {Type::string()});
-    addBuiltinFunction("len", Type::integer("int32", 32, false), {Type::string()});
-
-    auto printInfo = std::make_shared<FunctionInfo>();
-    printInfo->name = "print";
-    printInfo->qualifiedName = "print";
-    printInfo->returnType = Type::unit();
-    printInfo->isBuiltin = true;
-    printInfo->builtinName = "print";
-    Symbol printSym;
-    printSym.kind = SymbolKind::Function;
-    printSym.name = "print";
-    printSym.function = printInfo;
-    rootScope_->symbols.emplace("print", std::move(printSym));
-}
-
 void Analyzer::addBuiltinFunction(std::string name, Type returnType, std::vector<Type> params) {
     auto info = std::make_shared<FunctionInfo>();
     info->name = name;
     info->qualifiedName = name;
-    info->paramTypes = std::move(params);
     info->returnType = std::move(returnType);
+    info->paramTypes = std::move(params);
     info->isBuiltin = true;
-    info->builtinName = name;
+    info->builtinName = info->name;
 
     Symbol sym;
     sym.kind = SymbolKind::Function;
     sym.name = name;
+    sym.type = info->returnType;
     sym.function = info;
-    rootScope_->symbols.emplace(name, std::move(sym));
+    rootScope_->symbols[name] = std::move(sym);
+}
+
+void Analyzer::installBuiltins() {
+    // print — принимает любой тип (проверяется отдельно через isPrintable)
+    // Эти имена доступны сразу, до анализа пользовательского кода.
+    addBuiltinFunction("print", Type::unit());
+    addBuiltinFunction("input", Type::string());
+    addBuiltinFunction("exit",  Type::unit(), {Type::integer("int32", 32, false)});
+    addBuiltinFunction("panic", Type::unit(), {Type::string()});
+    addBuiltinFunction("len",   Type::integer("int32", 32, false), {Type::string()});
 }
 
 bool Analyzer::declare(Scope& scope, const Symbol& symbol, const AST::Node& node) {
-    if (scope.symbols.contains(symbol.name)) {
-        addDiagnostic(node, "повторное объявление имени '" + symbol.name + "' в одной области видимости");
+    auto it = scope.symbols.find(symbol.name);
+    if (it != scope.symbols.end()) {
+        addDiagnostic(node, "'" + symbol.name + "' уже объявлен в этой области видимости");
         return false;
     }
-    scope.symbols.emplace(symbol.name, symbol);
+    scope.symbols[symbol.name] = symbol;
     return true;
 }
 
 Analyzer::Symbol* Analyzer::lookupLocal(Scope& scope, const std::string& name) {
     auto it = scope.symbols.find(name);
-    if (it == scope.symbols.end()) return nullptr;
-    return &it->second;
+    if (it != scope.symbols.end()) return &it->second;
+    return nullptr;
 }
 
 Analyzer::Symbol* Analyzer::lookupLexical(const std::string& name) {
-    for (Scope* scope = currentScope_; scope != nullptr; scope = scope->parent) {
-        if (auto* sym = lookupLocal(*scope, name)) return sym;
+    Scope* s = currentScope_;
+    while (s) {
+        auto it = s->symbols.find(name);
+        if (it != s->symbols.end()) return &it->second;
+        s = s->parent;
+    }
+    return nullptr;
+}
+
+Analyzer::Symbol* Analyzer::resolvePathFromScope(Scope& start, const std::vector<std::string>& path, const AST::Node& /*node*/) {
+    Scope* s = &start;
+    for (std::size_t i = 0; i < path.size(); ++i) {
+        auto it = s->symbols.find(path[i]);
+        if (it == s->symbols.end()) return nullptr;
+        if (i + 1 == path.size()) return &it->second;
+        if (it->second.kind == SymbolKind::Namespace && it->second.namespaceScope)
+            s = it->second.namespaceScope;
+        else return nullptr;
     }
     return nullptr;
 }
 
 Analyzer::Symbol* Analyzer::resolvePath(const std::vector<std::string>& path, const AST::Node& node) {
     if (path.empty()) return nullptr;
-    Symbol* sym = lookupLexical(path.front());
-    if (!sym) {
-        addDiagnostic(node, "использование необъявленного идентификатора '" + path.front() + "'");
-        return nullptr;
-    }
+    if (path.size() == 1) return lookupLexical(path[0]);
 
-    for (std::size_t i = 1; i < path.size(); ++i) {
-        if (sym->kind != SymbolKind::Namespace || !sym->namespaceScope) {
-            addDiagnostic(node, "'" + sym->name + "' не является пространством имён");
-            return nullptr;
-        }
-        sym = lookupLocal(*sym->namespaceScope, path[i]);
-        if (!sym) {
-            addDiagnostic(node, "имя '" + path[i] + "' не найдено в '" + joinPath(std::vector<std::string>(path.begin(), path.begin() + static_cast<std::ptrdiff_t>(i))) + "'");
-            return nullptr;
-        }
+    // Пробуем от корня
+    Symbol* s = resolvePathFromScope(*rootScope_, path, node);
+    if (s) return s;
+
+    // Пробуем от moduleScope
+    if (moduleScope_) {
+        s = resolvePathFromScope(*moduleScope_, path, node);
+        if (s) return s;
     }
-    return sym;
+    return nullptr;
 }
 
-Analyzer::Symbol* Analyzer::resolvePathFromScope(Scope& start, const std::vector<std::string>& path, const AST::Node& node) {
-    if (path.empty()) return nullptr;
-    Symbol* sym = lookupLocal(start, path.front());
-    if (!sym) {
-        addDiagnostic(node, "использование необъявленного идентификатора '" + path.front() + "'");
-        return nullptr;
-    }
-    for (std::size_t i = 1; i < path.size(); ++i) {
-        if (sym->kind != SymbolKind::Namespace || !sym->namespaceScope) {
-            addDiagnostic(node, "'" + sym->name + "' не является пространством имён");
-            return nullptr;
+// ─── First pass: register all top-level declarations ─────────────────────────
+
+bool Analyzer::analyze(AST::Module& module) {
+    diagnostics_.clear();
+    ownedScopes_.clear();
+
+    rootScope_ = makeScope(nullptr, false, "");
+    installBuiltins();
+
+    // Сначала находим область модуля, потом анализируем все объявления внутри неё.
+    if (!module.namePath.empty()) {
+        Scope* s = rootScope_;
+        for (const auto& part : module.namePath) {
+            std::string q = s->qualifiedName.empty() ? part : s->qualifiedName + "::" + part;
+            s = ensureNamespace(*s, part, module);
         }
-        sym = lookupLocal(*sym->namespaceScope, path[i]);
-        if (!sym) {
-            addDiagnostic(node, "имя '" + path[i] + "' не найдено");
-            return nullptr;
-        }
+        moduleScope_ = s;
+    } else {
+        moduleScope_ = rootScope_;
     }
-    return sym;
+    currentScope_ = moduleScope_;
+
+    // Первый проход — регистрируем все типы и функции
+    for (auto& decl : module.decls) analyzeDecl(*decl);
+
+    return diagnostics_.empty();
 }
 
 void Analyzer::analyzeDecl(AST::Decl& decl) {
-    if (auto* ns = dynamic_cast<AST::NamespaceDecl*>(&decl)) return analyzeNamespaceDecl(*ns);
-    if (auto* alias = dynamic_cast<AST::TypeAliasDecl*>(&decl)) return analyzeTypeAliasDecl(*alias);
-    if (auto* st = dynamic_cast<AST::StructDecl*>(&decl)) return analyzeStructDecl(*st);
-    if (auto* fn = dynamic_cast<AST::FunctionDecl*>(&decl)) return analyzeFunctionDecl(*fn);
-    addDiagnostic(decl, "неизвестный вид объявления");
+    // На первом проходе регистрируем только структуру программы, без входа в тела.
+    if (auto* ns = dynamic_cast<AST::NamespaceDecl*>(&decl))      return analyzeNamespaceDecl(*ns);
+    if (auto* ta = dynamic_cast<AST::TypeAliasDecl*>(&decl))      return analyzeTypeAliasDecl(*ta);
+    if (auto* st = dynamic_cast<AST::StructDecl*>(&decl))         return analyzeStructDecl(*st);
+    if (auto* fn = dynamic_cast<AST::FunctionDecl*>(&decl))       return analyzeFunctionDecl(*fn);
 }
 
 void Analyzer::analyzeNamespaceDecl(AST::NamespaceDecl& decl) {
-    auto* nsScope = makeScope(currentScope_, true, qualify(decl.name));
-    Symbol sym;
-    sym.kind = SymbolKind::Namespace;
-    sym.name = decl.name;
-    sym.namespaceScope = nsScope;
-    if (!declare(*currentScope_, sym, decl)) return;
-
+    Scope* ns = ensureNamespace(*currentScope_, decl.name, decl);
     Scope* saved = currentScope_;
-    currentScope_ = nsScope;
+    currentScope_ = ns;
     namespaceStack_.push_back(decl.name);
     for (auto& child : decl.decls) analyzeDecl(*child);
     namespaceStack_.pop_back();
@@ -318,245 +240,230 @@ void Analyzer::analyzeNamespaceDecl(AST::NamespaceDecl& decl) {
 }
 
 void Analyzer::analyzeTypeAliasDecl(AST::TypeAliasDecl& decl) {
-    Type target = resolveType(*decl.aliasedType);
+    Type aliased = resolveType(*decl.aliasedType);
     Symbol sym;
     sym.kind = SymbolKind::Alias;
     sym.name = decl.name;
-    sym.type = target;
+    sym.type = aliased;
     declare(*currentScope_, sym, decl);
 }
 
 void Analyzer::analyzeStructDecl(AST::StructDecl& decl) {
+    const std::string qname = qualify(decl.name);
     auto info = std::make_shared<StructInfo>();
     info->name = decl.name;
-    info->qualifiedName = qualify(decl.name);
-
-    std::unordered_set<std::string> seenFields;
-    for (auto& field : decl.fields) {
-        if (!seenFields.insert(field.name).second) {
-            addDiagnostic(field.span.begin, "повторное поле структуры '" + field.name + "'");
-            continue;
-        }
-        Type fieldType = resolveType(*field.type);
-        info->fields.emplace(field.name, fieldType);
-        info->fieldsInOrder.emplace_back(field.name, fieldType);
+    info->qualifiedName = qname;
+    for (auto& f : decl.fields) {
+        Type ft = resolveType(*f.type);
+        info->fieldsInOrder.push_back({f.name, ft});
+        info->fields[f.name] = ft;
     }
-
     Symbol sym;
     sym.kind = SymbolKind::Struct;
     sym.name = decl.name;
-    sym.type = Type::structure(info->qualifiedName);
+    sym.type = Type::structure(qname);
     sym.structure = info;
     declare(*currentScope_, sym, decl);
 }
 
 void Analyzer::analyzeFunctionDecl(AST::FunctionDecl& decl) {
+    const std::string qname = qualify(decl.name);
+
     auto info = std::make_shared<FunctionInfo>();
     info->name = decl.name;
-    info->qualifiedName = qualify(decl.name);
+    info->qualifiedName = qname;
     info->decl = &decl;
 
-    std::unordered_set<std::string> paramNames;
-    for (auto& param : decl.params) {
-        if (!paramNames.insert(param.name).second) {
-            addDiagnostic(param.span.begin, "повторный параметр функции '" + param.name + "'");
-        }
-        info->paramTypes.push_back(resolveType(*param.type));
+    // Параметры
+    for (auto& p : decl.params) {
+        Type pt = resolveType(*p.type);
+        info->paramTypes.push_back(pt);
     }
-    info->returnType = resolveType(*decl.returnType);
 
-    Symbol fnSym;
-    fnSym.kind = SymbolKind::Function;
-    fnSym.name = decl.name;
-    fnSym.function = info;
-    if (!declare(*currentScope_, fnSym, decl)) return;
+    // Тип возврата
+    if (decl.returnType) info->returnType = resolveType(*decl.returnType);
+    else info->returnType = Type::unit();
 
-    Scope* savedScope = currentScope_;
+    Symbol sym;
+    sym.kind = SymbolKind::Function;
+    sym.name = decl.name;
+    sym.type = info->returnType;
+    sym.function = info;
+    declare(*currentScope_, sym, decl);
+
+    // Анализируем тело функции
+    Scope* saved = currentScope_;
+    Scope* fnScope = makeScope(currentScope_, false);
+    currentScope_ = fnScope;
+
     Type savedReturn = currentReturnType_;
-    int savedLoopDepth = loopDepth_;
-
-    auto* functionScope = makeScope(currentScope_, false, info->qualifiedName + "::<fn>");
-    currentScope_ = functionScope;
     currentReturnType_ = info->returnType;
-    loopDepth_ = 0;
 
+    // Объявляем параметры в области видимости функции
     for (std::size_t i = 0; i < decl.params.size(); ++i) {
         Symbol paramSym;
         paramSym.kind = SymbolKind::Variable;
         paramSym.name = decl.params[i].name;
         paramSym.type = info->paramTypes[i];
         paramSym.isMutable = false;
-        declare(*currentScope_, paramSym, *decl.params[i].type);
+        declare(*currentScope_, paramSym, decl);
     }
 
-    Flow flow = analyzeBlock(*decl.body, false);
-    if (info->returnType.kind != Type::Kind::Unit && flow == Flow::MayContinue) {
-        addDiagnostic(decl, "не все пути исполнения функции '" + decl.name + "' возвращают значение");
-    }
+    analyzeBlock(*decl.body, false);
 
-    currentScope_ = savedScope;
     currentReturnType_ = savedReturn;
-    loopDepth_ = savedLoopDepth;
+    currentScope_ = saved;
 }
+
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 Type Analyzer::resolveType(AST::TypeExpr& typeExpr) {
     if (auto* named = dynamic_cast<AST::NamedType*>(&typeExpr)) return resolveNamedType(*named);
     if (auto* arr = dynamic_cast<AST::ArrayType*>(&typeExpr)) {
         Type elem = resolveType(*arr->elementType);
-        if (arr->size == 0) {
-            addDiagnostic(*arr, "размер массива должен быть положительным");
-            return Type::error();
-        }
         return Type::array(elem, arr->size);
     }
-    addDiagnostic(typeExpr, "неизвестное выражение типа");
+    addDiagnostic(typeExpr, "неизвестный вид типа");
     return Type::error();
 }
 
 Type Analyzer::resolveNamedType(AST::NamedType& typeExpr) {
-    if (typeExpr.path.size() == 1) {
-        const std::string& name = typeExpr.path[0];
-        if (name == "unit") return Type::unit();
-        if (name == "bool") return Type::boolean();
-        if (name == "string") return Type::string();
-        if (name == "int8") return Type::integer("int8", 8, false);
-        if (name == "int16") return Type::integer("int16", 16, false);
-        if (name == "int32") return Type::integer("int32", 32, false);
-        if (name == "int64") return Type::integer("int64", 64, false);
-        if (name == "uint8") return Type::integer("uint8", 8, true);
-        if (name == "uint16") return Type::integer("uint16", 16, true);
-        if (name == "uint32") return Type::integer("uint32", 32, true);
-        if (name == "uint64") return Type::integer("uint64", 64, true);
-        if (name == "float32") return Type::floating("float32", 32);
-        if (name == "float64") return Type::floating("float64", 64);
-    }
+    const std::string name = joinPath(typeExpr.path);
+    // Встроенные типы
+    if (name == "int8")    return Type::integer("int8",  8,  false);
+    if (name == "int16")   return Type::integer("int16", 16, false);
+    if (name == "int32")   return Type::integer("int32", 32, false);
+    if (name == "int64")   return Type::integer("int64", 64, false);
+    if (name == "uint8")   return Type::integer("uint8",  8,  true);
+    if (name == "uint16")  return Type::integer("uint16", 16, true);
+    if (name == "uint32")  return Type::integer("uint32", 32, true);
+    if (name == "uint64")  return Type::integer("uint64", 64, true);
+    if (name == "float32") return Type::floating("float32", 32);
+    if (name == "float64") return Type::floating("float64", 64);
+    if (name == "bool")    return Type::boolean();
+    if (name == "string")  return Type::string();
+    if (name == "unit")    return Type::unit();
 
+    // Пользовательские типы
     Symbol* sym = resolvePath(typeExpr.path, typeExpr);
-    if (!sym) return Type::error();
+    if (!sym) {
+        addDiagnostic(typeExpr, "неизвестный тип '" + name + "'");
+        return Type::error();
+    }
     if (sym->kind == SymbolKind::Alias) return sym->type;
     if (sym->kind == SymbolKind::Struct) return sym->type;
-    addDiagnostic(typeExpr, "'" + joinPath(typeExpr.path) + "' не является типом");
+    addDiagnostic(typeExpr, "'" + name + "' не является типом");
     return Type::error();
 }
 
+// ─── Statements ──────────────────────────────────────────────────────────────
+
 Analyzer::Flow Analyzer::analyzeBlock(AST::BlockStmt& block, bool createScope) {
     Scope* saved = currentScope_;
-    if (createScope) currentScope_ = makeScope(currentScope_, false, "<block>");
-
+    if (createScope) currentScope_ = makeScope(currentScope_, false);
     Flow flow = Flow::MayContinue;
     for (auto& stmt : block.statements) {
-        if (flow == Flow::NoContinue) {
-            // По спецификации это можно считать предупреждением; чтобы не ломать базовые программы,
-            // здесь не выдаём error, но поток выполнения уже известен.
-            analyzeStmt(*stmt);
-            continue;
-        }
-        Flow stmtFlow = analyzeStmt(*stmt);
-        if (stmtFlow == Flow::NoContinue) flow = Flow::NoContinue;
+        Flow f = analyzeStmt(*stmt);
+        if (f == Flow::NoContinue) flow = Flow::NoContinue;
     }
-
     if (createScope) currentScope_ = saved;
     return flow;
 }
 
 Analyzer::Flow Analyzer::analyzeStmt(AST::Stmt& stmt) {
     if (dynamic_cast<AST::EmptyStmt*>(&stmt)) return Flow::MayContinue;
-    if (auto* block = dynamic_cast<AST::BlockStmt*>(&stmt)) return analyzeBlock(*block, true);
+    if (auto* b = dynamic_cast<AST::BlockStmt*>(&stmt)) return analyzeBlock(*b, true);
 
     if (auto* let = dynamic_cast<AST::LetStmt*>(&stmt)) {
         std::optional<Type> expected;
-        Type declaredType = Type::error();
-        if (let->explicitType) {
-            declaredType = resolveType(*let->explicitType);
-            expected = declaredType;
-        }
-        Type initType = analyzeExpr(*let->initializer, expected);
-        Type variableType = let->explicitType ? declaredType : initType;
-        if (let->explicitType) checkAssignable(declaredType, initType, *let);
-
+        if (let->explicitType) expected = resolveType(*let->explicitType);
+        Type init = analyzeExpr(*let->initializer, expected);
+        if (expected && !expected->isError() && !init.isError())
+            checkAssignable(*expected, init, *let->initializer);
+        Type varType = expected.value_or(init);
+        if (varType.isError()) varType = init;
         Symbol sym;
         sym.kind = SymbolKind::Variable;
         sym.name = let->name;
-        sym.type = variableType;
+        sym.type = varType;
         sym.isMutable = false;
-        declare(*currentScope_, sym, *let);
+        declare(*currentScope_, sym, stmt);
         return Flow::MayContinue;
     }
 
     if (auto* var = dynamic_cast<AST::VarStmt*>(&stmt)) {
-        Type declaredType = resolveType(*var->explicitType);
-        Type initType = analyzeExpr(*var->initializer, declaredType);
-        checkAssignable(declaredType, initType, *var);
-
+        Type declared = resolveType(*var->explicitType);
+        Type init = analyzeExpr(*var->initializer, declared);
+        if (!declared.isError() && !init.isError())
+            checkAssignable(declared, init, *var->initializer);
         Symbol sym;
         sym.kind = SymbolKind::Variable;
         sym.name = var->name;
-        sym.type = declaredType;
+        sym.type = declared;
         sym.isMutable = true;
-        declare(*currentScope_, sym, *var);
+        declare(*currentScope_, sym, stmt);
         return Flow::MayContinue;
     }
 
-    if (auto* assign = dynamic_cast<AST::AssignStmt*>(&stmt)) {
-        LValueInfo target = analyzeLValue(*assign->target);
-        Type rhs = analyzeExpr(*assign->value, target.type);
-        if (!target.isLValue) {
-            addDiagnostic(*assign->target, "левая часть присваивания не является lvalue");
-        } else if (!target.isMutable) {
-            addDiagnostic(*assign->target, "нельзя присвоить значение в неизменяемый let/параметр");
-        }
-        checkAssignable(target.type, rhs, *assign);
+    if (auto* asg = dynamic_cast<AST::AssignStmt*>(&stmt)) {
+        LValueInfo lv = analyzeLValue(*asg->target);
+        if (!lv.isLValue)
+            addDiagnostic(*asg->target, "левая часть присваивания не является l-value");
+        else if (!lv.isMutable)
+            addDiagnostic(*asg->target, "нельзя присваивать иммутабельной переменной");
+        Type rhs = analyzeExpr(*asg->value, lv.isLValue ? std::optional<Type>(lv.type) : std::nullopt);
+        if (lv.isLValue && !lv.type.isError() && !rhs.isError())
+            checkAssignable(lv.type, rhs, *asg->value);
         return Flow::MayContinue;
     }
 
-    if (auto* expr = dynamic_cast<AST::ExprStmt*>(&stmt)) return analyzeExprStmt(*expr);
-    if (auto* ifStmt = dynamic_cast<AST::IfStmt*>(&stmt)) return analyzeIf(*ifStmt);
-    if (auto* whileStmt = dynamic_cast<AST::WhileStmt*>(&stmt)) return analyzeWhile(*whileStmt);
+    if (auto* es = dynamic_cast<AST::ExprStmt*>(&stmt)) return analyzeExprStmt(*es);
 
-    if (auto* ret = dynamic_cast<AST::ReturnStmt*>(&stmt)) {
-        if (!ret->value) {
-            if (currentReturnType_.kind != Type::Kind::Unit) {
-                addDiagnostic(*ret, "return; допустим только в функции с результатом unit");
-            }
-        } else {
-            Type valueType = analyzeExpr(*ret->value, currentReturnType_);
-            checkAssignable(currentReturnType_, valueType, *ret);
-        }
-        return Flow::NoContinue;
-    }
+    if (auto* ifs = dynamic_cast<AST::IfStmt*>(&stmt)) return analyzeIf(*ifs);
+    if (auto* wh  = dynamic_cast<AST::WhileStmt*>(&stmt)) return analyzeWhile(*wh);
 
     if (dynamic_cast<AST::BreakStmt*>(&stmt)) {
         if (loopDepth_ == 0) addDiagnostic(stmt, "break вне цикла");
-        return Flow::NoContinue;
+        return Flow::MayContinue;
     }
-
     if (dynamic_cast<AST::ContinueStmt*>(&stmt)) {
         if (loopDepth_ == 0) addDiagnostic(stmt, "continue вне цикла");
+        return Flow::MayContinue;
+    }
+
+    if (auto* ret = dynamic_cast<AST::ReturnStmt*>(&stmt)) {
+        if (ret->value) {
+            Type vt = analyzeExpr(*ret->value, currentReturnType_);
+            if (!currentReturnType_.isError() && !vt.isError())
+                checkAssignable(currentReturnType_, vt, *ret->value);
+        } else {
+            if (currentReturnType_.kind != Type::Kind::Unit)
+                addDiagnostic(stmt, "функция должна вернуть значение типа " + currentReturnType_.toString());
+        }
         return Flow::NoContinue;
     }
 
-    addDiagnostic(stmt, "неизвестный вид инструкции");
+    addDiagnostic(stmt, "неизвестный оператор");
     return Flow::MayContinue;
 }
 
 Analyzer::Flow Analyzer::analyzeIf(AST::IfStmt& stmt) {
-    Type cond = analyzeExpr(*stmt.condition, Type::boolean());
-    checkAssignable(Type::boolean(), cond, *stmt.condition);
-
+    Type cond = analyzeExpr(*stmt.condition);
+    if (!cond.isError() && cond.kind != Type::Kind::Bool)
+        addDiagnostic(*stmt.condition, "условие if должно быть bool, получен " + cond.toString());
     Flow thenFlow = analyzeBlock(*stmt.thenBlock, true);
-    Flow elseFlow = Flow::MayContinue;
     if (stmt.elseBranch) {
-        elseFlow = analyzeStmt(*stmt.elseBranch);
-    }
-    if (stmt.elseBranch && thenFlow == Flow::NoContinue && elseFlow == Flow::NoContinue) {
-        return Flow::NoContinue;
+        Flow elseFlow = analyzeStmt(*stmt.elseBranch);
+        if (thenFlow == Flow::NoContinue && elseFlow == Flow::NoContinue)
+            return Flow::NoContinue;
     }
     return Flow::MayContinue;
 }
 
 Analyzer::Flow Analyzer::analyzeWhile(AST::WhileStmt& stmt) {
-    Type cond = analyzeExpr(*stmt.condition, Type::boolean());
-    checkAssignable(Type::boolean(), cond, *stmt.condition);
+    Type cond = analyzeExpr(*stmt.condition);
+    if (!cond.isError() && cond.kind != Type::Kind::Bool)
+        addDiagnostic(*stmt.condition, "условие while должно быть bool, получен " + cond.toString());
     ++loopDepth_;
     analyzeBlock(*stmt.body, true);
     --loopDepth_;
@@ -565,155 +472,138 @@ Analyzer::Flow Analyzer::analyzeWhile(AST::WhileStmt& stmt) {
 
 Analyzer::Flow Analyzer::analyzeExprStmt(AST::ExprStmt& stmt) {
     analyzeExpr(*stmt.expr);
-    if (isTerminatingCall(*stmt.expr)) return Flow::NoContinue;
     return Flow::MayContinue;
+}
+
+// ─── Expressions ─────────────────────────────────────────────────────────────
+
+static void setType(AST::Expr& expr, const Type& t) {
+    expr.semanticType = t.name;
 }
 
 Type Analyzer::analyzeExpr(AST::Expr& expr, const std::optional<Type>& expected) {
     Type result = Type::error();
 
-    if (auto* e = dynamic_cast<AST::IntLiteralExpr*>(&expr)) {
-        (void)e;
-        result = Type::integer("int32", 32, false);
-    } else if (auto* e = dynamic_cast<AST::FloatLiteralExpr*>(&expr)) {
-        (void)e;
-        result = Type::floating("float64", 64);
-    } else if (auto* e = dynamic_cast<AST::BoolLiteralExpr*>(&expr)) {
-        (void)e;
+    // Дальше идём по виду выражения и проверяем его в подходящем контексте.
+    if (dynamic_cast<AST::IntLiteralExpr*>(&expr)) {
+        // Тип по умолчанию int32, но если есть контекст — используем его
+        if (expected && (expected->kind == Type::Kind::Int || expected->kind == Type::Kind::UInt))
+            result = *expected;
+        else
+            result = Type::integer("int32", 32, false);
+    }
+    else if (dynamic_cast<AST::FloatLiteralExpr*>(&expr)) {
+        if (expected && expected->kind == Type::Kind::Float) result = *expected;
+        else result = Type::floating("float64", 64);
+    }
+    else if (dynamic_cast<AST::BoolLiteralExpr*>(&expr)) {
         result = Type::boolean();
-    } else if (auto* e = dynamic_cast<AST::StringLiteralExpr*>(&expr)) {
-        (void)e;
+    }
+    else if (dynamic_cast<AST::StringLiteralExpr*>(&expr)) {
         result = Type::string();
-    } else if (auto* e = dynamic_cast<AST::NameExpr*>(&expr)) {
+    }
+    else if (auto* e = dynamic_cast<AST::NameExpr*>(&expr)) {
         result = analyzeNameExpr(*e);
-    } else if (auto* e = dynamic_cast<AST::ArrayLiteralExpr*>(&expr)) {
+    }
+    else if (auto* e = dynamic_cast<AST::ArrayLiteralExpr*>(&expr)) {
         result = analyzeArrayLiteral(*e, expected);
-    } else if (auto* e = dynamic_cast<AST::StructLiteralExpr*>(&expr)) {
+    }
+    else if (auto* e = dynamic_cast<AST::StructLiteralExpr*>(&expr)) {
         result = analyzeStructLiteral(*e);
-    } else if (auto* e = dynamic_cast<AST::UnaryExpr*>(&expr)) {
+    }
+    else if (auto* e = dynamic_cast<AST::UnaryExpr*>(&expr)) {
         result = analyzeUnary(*e);
-    } else if (auto* e = dynamic_cast<AST::BinaryExpr*>(&expr)) {
+    }
+    else if (auto* e = dynamic_cast<AST::BinaryExpr*>(&expr)) {
         result = analyzeBinary(*e);
-    } else if (auto* e = dynamic_cast<AST::CastExpr*>(&expr)) {
+    }
+    else if (auto* e = dynamic_cast<AST::CastExpr*>(&expr)) {
         result = analyzeCast(*e);
-    } else if (auto* e = dynamic_cast<AST::CallExpr*>(&expr)) {
+    }
+    else if (auto* e = dynamic_cast<AST::CallExpr*>(&expr)) {
         result = analyzeCall(*e);
-    } else if (auto* e = dynamic_cast<AST::FieldExpr*>(&expr)) {
+    }
+    else if (auto* e = dynamic_cast<AST::FieldExpr*>(&expr)) {
         result = analyzeField(*e);
-    } else if (auto* e = dynamic_cast<AST::IndexExpr*>(&expr)) {
+    }
+    else if (auto* e = dynamic_cast<AST::IndexExpr*>(&expr)) {
         result = analyzeIndex(*e);
-    } else {
-        addDiagnostic(expr, "неизвестный вид выражения");
+    }
+    else {
+        addDiagnostic(expr, "неизвестное выражение");
     }
 
-    expr.semanticType = result.toString();
+    setType(expr, result);
     return result;
 }
 
 Type Analyzer::analyzeNameExpr(AST::NameExpr& expr) {
     Symbol* sym = resolvePath(expr.path, expr);
-    if (!sym) return Type::error();
+    if (!sym) {
+        addDiagnostic(expr, "неизвестное имя '" + joinPath(expr.path) + "'");
+        return Type::error();
+    }
     if (sym->kind == SymbolKind::Variable) return sym->type;
-    if (sym->kind == SymbolKind::Function) {
-        addDiagnostic(expr, "функции не являются значениями первого класса; используйте вызов функции");
-        return Type::error();
-    }
-    if (sym->kind == SymbolKind::Struct || sym->kind == SymbolKind::Alias) {
-        addDiagnostic(expr, "тип нельзя использовать как значение");
-        return Type::error();
-    }
-    if (sym->kind == SymbolKind::Namespace) {
-        addDiagnostic(expr, "пространство имён нельзя использовать как значение");
-        return Type::error();
-    }
+    if (sym->kind == SymbolKind::Function) return sym->type;
+    addDiagnostic(expr, "'" + joinPath(expr.path) + "' не является значением");
     return Type::error();
 }
 
 Type Analyzer::analyzeArrayLiteral(AST::ArrayLiteralExpr& expr, const std::optional<Type>& expected) {
-    std::optional<Type> elemExpected;
-    std::uint64_t expectedSize = 0;
-    if (expected && expected->kind == Type::Kind::Array) {
-        elemExpected = *expected->elementType;
-        expectedSize = expected->arraySize;
-    }
-
     if (expr.elements.empty()) {
-        if (!elemExpected) {
-            addDiagnostic(expr, "пустой литерал массива без ожидаемого типа запрещён");
-            return Type::error();
-        }
-        if (expectedSize != 0) {
-            addDiagnostic(expr, "размер литерала массива 0 не совпадает с ожидаемым размером " + std::to_string(expectedSize));
-        }
-        return Type::array(*elemExpected, 0);
+        addDiagnostic(expr, "литерал пустого массива требует явной аннотации типа");
+        return Type::error();
     }
+    std::optional<Type> elemExpected;
+    if (expected && expected->kind == Type::Kind::Array && expected->elementType)
+        elemExpected = *expected->elementType;
 
-    Type elemType = analyzeExpr(*expr.elements.front(), elemExpected);
+    Type firstElem = analyzeExpr(*expr.elements[0], elemExpected);
     for (std::size_t i = 1; i < expr.elements.size(); ++i) {
-        Type current = analyzeExpr(*expr.elements[i], elemExpected ? elemExpected : elemType);
-        checkAssignable(elemExpected ? *elemExpected : elemType, current, *expr.elements[i]);
+        Type t = analyzeExpr(*expr.elements[i], firstElem);
+        if (!t.isError() && !firstElem.isError() && t != firstElem)
+            addDiagnostic(*expr.elements[i], "элементы массива имеют разные типы: " +
+                          firstElem.toString() + " vs " + t.toString());
     }
-
-    Type result = Type::array(elemExpected ? *elemExpected : elemType, expr.elements.size());
-    if (expected && expected->kind == Type::Kind::Array && expected->arraySize != expr.elements.size()) {
-        addDiagnostic(expr, "размер литерала массива " + std::to_string(expr.elements.size()) +
-                            " не совпадает с ожидаемым размером " + std::to_string(expected->arraySize));
-    }
-    return result;
+    return Type::array(firstElem, expr.elements.size());
 }
 
 Type Analyzer::analyzeStructLiteral(AST::StructLiteralExpr& expr) {
-    AST::NamedType fakeType;
-    fakeType.path = expr.typePath;
-    fakeType.span = expr.span;
-    Type type = resolveNamedType(fakeType);
-    if (type.kind != Type::Kind::Struct) {
-        addDiagnostic(expr, "литерал структуры требует имя структуры");
+    Symbol* sym = resolvePath(expr.typePath, expr);
+    if (!sym || sym->kind != SymbolKind::Struct || !sym->structure) {
+        addDiagnostic(expr, "неизвестный тип структуры '" + joinPath(expr.typePath) + "'");
+        for (auto& f : expr.fields) analyzeExpr(*f.value);
         return Type::error();
     }
-
-    Symbol* sym = resolvePath(expr.typePath, expr);
-    if (!sym || sym->kind != SymbolKind::Struct || !sym->structure) return Type::error();
-    const auto& st = *sym->structure;
-
-    std::unordered_set<std::string> seen;
-    for (auto& field : expr.fields) {
-        if (!seen.insert(field.name).second) {
-            addDiagnostic(field.span.begin, "поле '" + field.name + "' инициализировано повторно");
-            continue;
-        }
-        auto it = st.fields.find(field.name);
-        if (it == st.fields.end()) {
-            addDiagnostic(field.span.begin, "лишнее поле '" + field.name + "' в литерале структуры '" + st.qualifiedName + "'");
-            analyzeExpr(*field.value);
-            continue;
-        }
-        Type valueType = analyzeExpr(*field.value, it->second);
-        checkAssignable(it->second, valueType, *field.value);
-    }
-
-    for (const auto& [name, typeOfField] : st.fieldsInOrder) {
-        (void)typeOfField;
-        if (!seen.contains(name)) {
-            addDiagnostic(expr, "не инициализировано поле '" + name + "' структуры '" + st.qualifiedName + "'");
+    const auto& info = *sym->structure;
+    // Проверяем поля
+    for (auto& f : expr.fields) {
+        auto it = info.fields.find(f.name);
+        if (it == info.fields.end()) {
+            addDiagnostic(expr, "поле '" + f.name + "' не существует в структуре " + info.qualifiedName);
+            analyzeExpr(*f.value);
+        } else {
+            Type vt = analyzeExpr(*f.value, it->second);
+            if (!vt.isError() && !it->second.isError())
+                checkAssignable(it->second, vt, *f.value);
         }
     }
-
-    return type;
+    return Type::structure(info.qualifiedName);
 }
 
 Type Analyzer::analyzeUnary(AST::UnaryExpr& expr) {
     Type operand = analyzeExpr(*expr.operand);
+    if (operand.isError()) return Type::error();
     if (expr.op == "-") {
         if (!operand.isNumeric()) {
-            addDiagnostic(expr, "унарный '-' применим только к числовым типам");
+            addDiagnostic(expr, "унарный минус применим только к числовым типам, получен " + operand.toString());
             return Type::error();
         }
         return operand;
     }
     if (expr.op == "!") {
-        if (operand != Type::boolean()) {
-            addDiagnostic(expr, "оператор '!' применим только к bool");
+        if (operand.kind != Type::Kind::Bool) {
+            addDiagnostic(expr, "логическое отрицание применимо только к bool, получен " + operand.toString());
             return Type::error();
         }
         return Type::boolean();
@@ -723,58 +613,71 @@ Type Analyzer::analyzeUnary(AST::UnaryExpr& expr) {
 }
 
 Type Analyzer::analyzeBinary(AST::BinaryExpr& expr) {
-    Type left = analyzeExpr(*expr.left);
-    Type right = analyzeExpr(*expr.right, left);
-    const std::string& op = expr.op;
+    Type left  = analyzeExpr(*expr.left);
+    Type right = analyzeExpr(*expr.right);
+    if (left.isError() || right.isError()) return Type::error();
 
-    if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%") {
-        if (op == "+" && left == Type::string() && right == Type::string()) return Type::string();
-        if (op == "%") {
-            if (!left.isInteger() || !right.isInteger()) {
-                addDiagnostic(expr, "оператор '%' применим только к целочисленным типам");
-                return Type::error();
-            }
-        } else if (!left.isNumeric() || !right.isNumeric()) {
-            addDiagnostic(expr, "арифметический оператор '" + op + "' применим только к числовым типам");
-            return Type::error();
-        }
-        checkAssignable(left, right, expr);
-        return left;
-    }
+    const auto& op = expr.op;
 
+    // Логические
     if (op == "&&" || op == "||") {
-        checkAssignable(Type::boolean(), left, *expr.left);
-        checkAssignable(Type::boolean(), right, *expr.right);
+        if (left.kind != Type::Kind::Bool)
+            addDiagnostic(*expr.left,  "оператор " + op + " требует bool, получен " + left.toString());
+        if (right.kind != Type::Kind::Bool)
+            addDiagnostic(*expr.right, "оператор " + op + " требует bool, получен " + right.toString());
         return Type::boolean();
     }
 
-    if (op == "==" || op == "!=") {
-        checkAssignable(left, right, expr);
-        if (!(left.isNumeric() || left.kind == Type::Kind::Bool || left.kind == Type::Kind::String ||
-              left.kind == Type::Kind::Array || left.kind == Type::Kind::Struct || left.isError())) {
-            addDiagnostic(expr, "оператор '" + op + "' не определён для типа " + left.toString());
-        }
+    // Строковая конкатенация
+    if (op == "+" && left.kind == Type::Kind::String) {
+        if (right.kind != Type::Kind::String)
+            addDiagnostic(expr, "оператор + для строк требует string справа, получен " + right.toString());
+        return Type::string();
+    }
+
+    // Строковое сравнение
+    if ((op == "==" || op == "!=") && left.kind == Type::Kind::String) {
+        if (right.kind != Type::Kind::String)
+            addDiagnostic(expr, "нельзя сравнивать string с " + right.toString());
         return Type::boolean();
     }
 
-    if (op == "<" || op == "<=" || op == ">" || op == ">=") {
-        if (!left.isNumeric() || !right.isNumeric()) {
-            addDiagnostic(expr, "порядковые сравнения применимы только к числовым типам");
-        }
-        checkAssignable(left, right, expr);
+    // Сравнение агрегатов (==, != по ТЗ)
+    if ((op == "==" || op == "!=") && (left.kind == Type::Kind::Array || left.kind == Type::Kind::Struct)) {
+        if (left != right)
+            addDiagnostic(expr, "нельзя сравнивать " + left.toString() + " с " + right.toString());
         return Type::boolean();
     }
 
-    addDiagnostic(expr, "неизвестный бинарный оператор '" + op + "'");
+    // Арифметика и сравнения для чисел
+    if (left.isNumeric() && right.isNumeric()) {
+        // Типы должны совпадать (нет неявного приведения)
+        if (left != right)
+            addDiagnostic(expr, "несовместимые типы для оператора " + op + ": " +
+                          left.toString() + " и " + right.toString());
+        if (op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=")
+            return Type::boolean();
+        if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%")
+            return left;
+        addDiagnostic(expr, "оператор " + op + " не поддерживается для числовых типов");
+        return Type::error();
+    }
+
+    // Булево сравнение
+    if ((op == "==" || op == "!=") && left.kind == Type::Kind::Bool && right.kind == Type::Kind::Bool)
+        return Type::boolean();
+
+    addDiagnostic(expr, "оператор " + op + " не применим к типам " + left.toString() + " и " + right.toString());
     return Type::error();
 }
 
 Type Analyzer::analyzeCast(AST::CastExpr& expr) {
     Type from = analyzeExpr(*expr.value);
-    Type to = resolveType(*expr.targetType);
+    Type to   = resolveType(*expr.targetType);
+    if (from.isError() || to.isError()) return to.isError() ? Type::error() : to;
     if (!canCast(from, to)) {
         addDiagnostic(expr, "недопустимое приведение из " + from.toString() + " в " + to.toString());
-        return Type::error();
+        return to;
     }
     return to;
 }
@@ -782,157 +685,165 @@ Type Analyzer::analyzeCast(AST::CastExpr& expr) {
 Type Analyzer::analyzeCall(AST::CallExpr& expr) {
     auto* calleeName = dynamic_cast<AST::NameExpr*>(expr.callee.get());
     if (!calleeName) {
-        analyzeExpr(*expr.callee);
-        for (auto& arg : expr.args) analyzeExpr(*arg);
-        addDiagnostic(expr, "вызов возможен только для имени функции");
+        addDiagnostic(expr, "вызов только по имени функции");
+        for (auto& a : expr.args) analyzeExpr(*a);
         return Type::error();
     }
 
-    Symbol* sym = resolvePath(calleeName->path, *calleeName);
-    if (!sym) {
-        for (auto& arg : expr.args) analyzeExpr(*arg);
-        return Type::error();
-    }
-    if (sym->kind != SymbolKind::Function || !sym->function) {
-        for (auto& arg : expr.args) analyzeExpr(*arg);
-        addDiagnostic(expr, "вызов не-функции");
-        return Type::error();
-    }
+    const std::string name = joinPath(calleeName->path);
 
-    const auto& fn = *sym->function;
-    if (fn.isBuiltin && fn.builtinName == "print") {
+    // Специальный случай: print принимает любой printable тип
+    if (calleeName->path.size() == 1 && name == "print") {
         if (expr.args.size() != 1) {
-            addDiagnostic(expr, "print ожидает ровно один аргумент");
-            for (auto& arg : expr.args) analyzeExpr(*arg);
-            return Type::unit();
+            addDiagnostic(expr, "print ожидает 1 аргумент");
+        } else {
+            Type argType = analyzeExpr(*expr.args[0]);
+            if (!argType.isError() && !isPrintable(argType))
+                addDiagnostic(*expr.args[0], "тип " + argType.toString() + " не поддерживается функцией print");
         }
-        Type arg = analyzeExpr(*expr.args[0]);
-        if (!isPrintable(arg)) {
-            addDiagnostic(*expr.args[0], "тип " + arg.toString() + " нельзя напечатать в базовой реализации");
-        }
-        expr.callee->semanticType = "fn(printable) -> unit";
+        setType(*expr.callee, Type::unit());
         return Type::unit();
     }
 
-    if (expr.args.size() != fn.paramTypes.size()) {
-        addDiagnostic(expr, "функция '" + fn.qualifiedName + "' ожидает " + std::to_string(fn.paramTypes.size()) +
-                            " аргумент(ов), получено " + std::to_string(expr.args.size()));
+    Symbol* sym = resolvePath(calleeName->path, expr);
+    if (!sym || sym->kind != SymbolKind::Function || !sym->function) {
+        addDiagnostic(expr, "'" + name + "' не является функцией");
+        for (auto& a : expr.args) analyzeExpr(*a);
+        return Type::error();
     }
+    setType(*expr.callee, sym->type);
 
-    const std::size_t common = std::min(expr.args.size(), fn.paramTypes.size());
-    for (std::size_t i = 0; i < common; ++i) {
-        Type arg = analyzeExpr(*expr.args[i], fn.paramTypes[i]);
-        checkAssignable(fn.paramTypes[i], arg, *expr.args[i]);
-    }
-    for (std::size_t i = common; i < expr.args.size(); ++i) {
-        analyzeExpr(*expr.args[i]);
-    }
+    const auto& fn = *sym->function;
 
-    expr.callee->semanticType = "fn -> " + fn.returnType.toString();
+    // Для встроенных с переменным числом аргументов (len, exit, panic, input) — гибкая проверка
+    if (!fn.isBuiltin || !fn.paramTypes.empty()) {
+        if (expr.args.size() != fn.paramTypes.size()) {
+            addDiagnostic(expr, "функция '" + name + "' ожидает " +
+                          std::to_string(fn.paramTypes.size()) + " аргументов, получено " +
+                          std::to_string(expr.args.size()));
+        }
+        for (std::size_t i = 0; i < expr.args.size(); ++i) {
+            std::optional<Type> expected;
+            if (i < fn.paramTypes.size()) expected = fn.paramTypes[i];
+            Type at = analyzeExpr(*expr.args[i], expected);
+            if (expected && !expected->isError() && !at.isError())
+                checkAssignable(*expected, at, *expr.args[i]);
+        }
+    } else {
+        for (auto& a : expr.args) analyzeExpr(*a);
+    }
     return fn.returnType;
 }
 
 Type Analyzer::analyzeField(AST::FieldExpr& expr) {
-    Type object = analyzeExpr(*expr.object);
-    if (object.kind != Type::Kind::Struct) {
-        addDiagnostic(expr, "доступ к полю возможен только у структуры");
+    Type objType = analyzeExpr(*expr.object);
+    if (objType.isError()) return Type::error();
+    if (objType.kind != Type::Kind::Struct) {
+        addDiagnostic(expr, "доступ к полю применим только к структурам, получен " + objType.toString());
         return Type::error();
     }
-
-    std::vector<std::string> path;
-    std::size_t start = 0;
-    while (start < object.name.size()) {
-        std::size_t pos = object.name.find("::", start);
-        if (pos == std::string::npos) {
-            path.push_back(object.name.substr(start));
-            break;
+    // Ищем структуру
+    Symbol* sym = lookupLexical(objType.name);
+    // Также пробуем по parts
+    if (!sym) {
+        // поиск в rootScope
+        for (auto& [k, v] : rootScope_->symbols) {
+            if (v.kind == SymbolKind::Struct && v.structure && v.structure->qualifiedName == objType.name) {
+                sym = &v;
+                break;
+            }
         }
-        path.push_back(object.name.substr(start, pos - start));
-        start = pos + 2;
     }
-
-    Symbol* sym = resolvePath(path, expr);
-    if (!sym || sym->kind != SymbolKind::Struct || !sym->structure) return Type::error();
+    if (!sym || !sym->structure) {
+        addDiagnostic(expr, "не найдена структура " + objType.toString());
+        return Type::error();
+    }
     auto it = sym->structure->fields.find(expr.field);
     if (it == sym->structure->fields.end()) {
-        addDiagnostic(expr, "структура '" + object.name + "' не содержит поле '" + expr.field + "'");
+        addDiagnostic(expr, "поле '" + expr.field + "' не существует в " + objType.toString());
         return Type::error();
     }
     return it->second;
 }
 
 Type Analyzer::analyzeIndex(AST::IndexExpr& expr) {
-    Type object = analyzeExpr(*expr.object);
-    Type index = analyzeExpr(*expr.index);
-    if (object.kind != Type::Kind::Array) {
-        addDiagnostic(expr, "индексирование возможно только для массива");
+    Type objType = analyzeExpr(*expr.object);
+    Type idxType = analyzeExpr(*expr.index);
+    if (objType.isError()) return Type::error();
+    if (objType.kind != Type::Kind::Array) {
+        addDiagnostic(expr, "индексирование применимо только к массивам, получен " + objType.toString());
         return Type::error();
     }
-    if (!index.isInteger()) {
-        addDiagnostic(*expr.index, "индекс массива должен иметь целочисленный тип");
-    }
-    return object.elementType ? *object.elementType : Type::error();
+    if (!idxType.isError() && idxType.kind != Type::Kind::Int && idxType.kind != Type::Kind::UInt)
+        addDiagnostic(*expr.index, "индекс массива должен быть целым числом, получен " + idxType.toString());
+    return objType.elementType ? *objType.elementType : Type::error();
 }
 
 Analyzer::LValueInfo Analyzer::analyzeLValue(AST::Expr& expr) {
+    LValueInfo info;
     if (auto* name = dynamic_cast<AST::NameExpr*>(&expr)) {
-        Symbol* sym = resolvePath(name->path, *name);
-        if (!sym) return {};
-        if (sym->kind != SymbolKind::Variable) {
-            addDiagnostic(expr, "левая часть присваивания должна быть переменной, полем или элементом массива");
-            return {Type::error(), false, false};
-        }
-        expr.semanticType = sym->type.toString();
-        return {sym->type, true, sym->isMutable};
+        Symbol* sym = resolvePath(name->path, expr);
+        if (!sym || sym->kind != SymbolKind::Variable) return info;
+        info.isLValue = true;
+        info.isMutable = sym->isMutable;
+        info.type = sym->type;
+        setType(expr, sym->type);
+        return info;
     }
-
     if (auto* field = dynamic_cast<AST::FieldExpr*>(&expr)) {
         LValueInfo base = analyzeLValue(*field->object);
-        if (base.type.kind != Type::Kind::Struct) {
-            addDiagnostic(expr, "доступ к полю возможен только у структуры");
-            return {Type::error(), false, false};
-        }
-        Type fieldType = analyzeField(*field);
-        expr.semanticType = fieldType.toString();
-        return {fieldType, true, base.isMutable};
+        if (!base.isLValue) return info;
+        Type ft = analyzeField(*field);
+        info.isLValue = true;
+        info.isMutable = base.isMutable;
+        info.type = ft;
+        return info;
     }
-
-    if (auto* index = dynamic_cast<AST::IndexExpr*>(&expr)) {
-        LValueInfo base = analyzeLValue(*index->object);
-        Type indexType = analyzeExpr(*index->index);
-        if (!indexType.isInteger()) addDiagnostic(*index->index, "индекс массива должен иметь целочисленный тип");
-        if (base.type.kind != Type::Kind::Array) {
-            addDiagnostic(expr, "индексирование возможно только для массива");
-            return {Type::error(), false, false};
-        }
-        Type elem = index->object->semanticType ? (base.type.elementType ? *base.type.elementType : Type::error()) : Type::error();
-        expr.semanticType = elem.toString();
-        return {elem, true, base.isMutable};
+    if (auto* idx = dynamic_cast<AST::IndexExpr*>(&expr)) {
+        LValueInfo base = analyzeLValue(*idx->object);
+        if (!base.isLValue) return info;
+        Type et = analyzeIndex(*idx);
+        info.isLValue = true;
+        info.isMutable = base.isMutable;
+        info.type = et;
+        return info;
     }
-
+    // Анализируем выражение чтобы проставить типы, но это не l-value
     analyzeExpr(expr);
-    return {Type::error(), false, false};
+    return info;
 }
 
 bool Analyzer::checkAssignable(const Type& lhs, const Type& rhs, const AST::Node& node) {
-    if (lhs.isError() || rhs.isError()) return false;
-    if (lhs != rhs) {
-        addDiagnostic(node, "несовместимые типы: ожидался " + lhs.toString() + ", получен " + rhs.toString() +
-                            "; неявные приведения запрещены");
-        return false;
+    if (lhs == rhs) return true;
+    // int-литерал совместим с любым целочисленным типом
+    if ((lhs.kind == Type::Kind::Int || lhs.kind == Type::Kind::UInt) &&
+        (rhs.kind == Type::Kind::Int || rhs.kind == Type::Kind::UInt) &&
+        rhs.name == "int32") {
+        // допускаем присваивание int32-литерала к любому int/uint
+        return true;
     }
-    return true;
+    // float-литерал совместим с любым float
+    if (lhs.kind == Type::Kind::Float && rhs.kind == Type::Kind::Float && rhs.name == "float64") {
+        return true;
+    }
+    addDiagnostic(node, "несовместимые типы: ожидается " + lhs.toString() + ", получен " + rhs.toString());
+    return false;
 }
 
 bool Analyzer::canCast(const Type& from, const Type& to) const {
-    if (from.isError() || to.isError()) return true;
     if (from == to) return true;
     if (from.isNumeric() && to.isNumeric()) return true;
+    if (from.kind == Type::Kind::Bool && to.isNumeric()) return true;
+    if (from.isNumeric() && to.kind == Type::Kind::Bool) return true;
     return false;
 }
 
 bool Analyzer::isPrintable(const Type& type) const {
-    return type.isNumeric() || type.kind == Type::Kind::Bool || type.kind == Type::Kind::String || type.isError();
+    return type.kind == Type::Kind::Int   ||
+           type.kind == Type::Kind::UInt  ||
+           type.kind == Type::Kind::Float ||
+           type.kind == Type::Kind::Bool  ||
+           type.kind == Type::Kind::String;
 }
 
 bool Analyzer::isTerminatingCall(const AST::Expr& expr) const {
@@ -943,9 +854,11 @@ bool Analyzer::isTerminatingCall(const AST::Expr& expr) const {
     return name->path[0] == "exit" || name->path[0] == "panic";
 }
 
-std::string formatDiagnostic(const Diagnostic& diagnostic) {
-    return diagnostic.file + ":" + std::to_string(diagnostic.pos.line) + ":" +
-           std::to_string(diagnostic.pos.column) + ": error: " + diagnostic.message;
+// ─── Formatting ──────────────────────────────────────────────────────────────
+
+std::string formatDiagnostic(const Diagnostic& d) {
+    return d.file + ":" + std::to_string(d.pos.line) + ":" +
+           std::to_string(d.pos.column) + ": error: " + d.message;
 }
 
 } // namespace Semantic

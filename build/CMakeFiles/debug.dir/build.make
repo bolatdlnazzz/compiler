@@ -67,7 +67,7 @@ include CMakeFiles/debug.dir/compiler_depend.make
 include CMakeFiles/debug.dir/progress.make
 
 CMakeFiles/debug: src/astra
-	cd /home/dilya/VSCode/compiler && gdb /home/dilya/VSCode/compiler/build/astra
+	cd /home/dilya/VSCode/compiler && gdb /home/dilya/VSCode/compiler/build/src/astra
 
 debug: CMakeFiles/debug
 debug: CMakeFiles/debug.dir/build.make
