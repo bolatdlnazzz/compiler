@@ -143,7 +143,7 @@ private:
     void synchronizeStatement();
     
     // Может ли токен использоваться как имя переменной/функции?
-    // Включает: Identifier и встроенные имена (print, input, len, exit, panic)
+    // Включает: Identifier и встроенные имена (print, input, len, exit, panic, assert)
     bool isNameLike(const Lexer::Token& tok) const;
     
     // Может ли токен использоваться как имя типа?
@@ -169,6 +169,7 @@ private:
     // Входной параметр: лексема включает кавычки, например: "hello\nworld"
     // Выход: "hello\nworld" (с реальными символами переновода строки)
     static std::string decodeStringLiteral(std::string_view lexeme);
+    static char decodeCharLiteral(std::string_view lexeme);
     
     // Парсить одно объявление верхнего уровня
     // Возможные типы: namespace, type (type alias), struct, fn (функция)

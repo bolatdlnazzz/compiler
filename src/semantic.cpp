@@ -11,6 +11,7 @@ namespace Semantic {
 Type Type::error()   { Type t; t.kind = Kind::Error;  t.name = "<error>";  return t; }
 Type Type::unit()    { Type t; t.kind = Kind::Unit;   t.name = "unit";     return t; }
 Type Type::boolean() { Type t; t.kind = Kind::Bool;   t.name = "bool";     return t; }
+Type Type::character() { Type t; t.kind = Kind::Char; t.name = "char"; return t; }
 Type Type::string()  { Type t; t.kind = Kind::String; t.name = "string";   return t; }
 
 Type Type::integer(std::string name, int bits, bool isUnsigned) {
@@ -135,7 +136,9 @@ void Analyzer::installBuiltins() {
     addBuiltinFunction("input", Type::string());
     addBuiltinFunction("exit",  Type::unit(), {Type::integer("int32", 32, false)});
     addBuiltinFunction("panic", Type::unit(), {Type::string()});
-    addBuiltinFunction("len",   Type::integer("int32", 32, false), {Type::string()});
+    addBuiltinFunction("assert", Type::unit(), {Type::boolean()});
+    // len проверяется отдельно: принимает string или массив фиксированного размера.
+    addBuiltinFunction("len",   Type::integer("int32", 32, false));
 }
 
 bool Analyzer::declare(Scope& scope, const Symbol& symbol, const AST::Node& node) {
@@ -217,6 +220,17 @@ bool Analyzer::analyze(AST::Module& module) {
 
     // Первый проход — регистрируем все типы и функции
     for (auto& decl : module.decls) analyzeDecl(*decl);
+
+    // Точка входа обязательна по базовому ТЗ: main должен быть функцией и возвращать int.
+    Symbol* mainSym = lookupLexical("main");
+    if (!mainSym || mainSym->kind != SymbolKind::Function || !mainSym->function) {
+        addDiagnostic(module, "программа должна содержать функцию main");
+    } else {
+        const Type& ret = mainSym->function->returnType;
+        if (!(ret.kind == Type::Kind::Int && (ret.name == "int32" || ret.name == "int64" || ret.name == "int"))) {
+            addDiagnostic(*mainSym->function->decl, "функция main должна возвращать int32/int64");
+        }
+    }
 
     return diagnostics_.empty();
 }
@@ -341,6 +355,7 @@ Type Analyzer::resolveNamedType(AST::NamedType& typeExpr) {
     if (name == "float32") return Type::floating("float32", 32);
     if (name == "float64") return Type::floating("float64", 64);
     if (name == "bool")    return Type::boolean();
+    if (name == "char")    return Type::character();
     if (name == "string")  return Type::string();
     if (name == "unit")    return Type::unit();
 
@@ -498,6 +513,9 @@ Type Analyzer::analyzeExpr(AST::Expr& expr, const std::optional<Type>& expected)
     }
     else if (dynamic_cast<AST::BoolLiteralExpr*>(&expr)) {
         result = Type::boolean();
+    }
+    else if (dynamic_cast<AST::CharLiteralExpr*>(&expr)) {
+        result = Type::character();
     }
     else if (dynamic_cast<AST::StringLiteralExpr*>(&expr)) {
         result = Type::string();
@@ -667,6 +685,10 @@ Type Analyzer::analyzeBinary(AST::BinaryExpr& expr) {
     if ((op == "==" || op == "!=") && left.kind == Type::Kind::Bool && right.kind == Type::Kind::Bool)
         return Type::boolean();
 
+    // Символьное сравнение: char поддерживает только == и !=.
+    if ((op == "==" || op == "!=") && left.kind == Type::Kind::Char && right.kind == Type::Kind::Char)
+        return Type::boolean();
+
     addDiagnostic(expr, "оператор " + op + " не применим к типам " + left.toString() + " и " + right.toString());
     return Type::error();
 }
@@ -703,6 +725,32 @@ Type Analyzer::analyzeCall(AST::CallExpr& expr) {
         }
         setType(*expr.callee, Type::unit());
         return Type::unit();
+    }
+
+    // assert(bool) — встроенная проверка условия с аварийным завершением.
+    if (calleeName->path.size() == 1 && name == "assert") {
+        if (expr.args.size() != 1) {
+            addDiagnostic(expr, "assert ожидает 1 аргумент");
+        } else {
+            Type argType = analyzeExpr(*expr.args[0], Type::boolean());
+            if (!argType.isError() && argType.kind != Type::Kind::Bool)
+                addDiagnostic(*expr.args[0], "assert ожидает bool, получен " + argType.toString());
+        }
+        setType(*expr.callee, Type::unit());
+        return Type::unit();
+    }
+
+    // len(x) — строка или массив фиксированного размера.
+    if (calleeName->path.size() == 1 && name == "len") {
+        if (expr.args.size() != 1) {
+            addDiagnostic(expr, "len ожидает 1 аргумент");
+        } else {
+            Type argType = analyzeExpr(*expr.args[0]);
+            if (!argType.isError() && argType.kind != Type::Kind::String && argType.kind != Type::Kind::Array)
+                addDiagnostic(*expr.args[0], "len ожидает string или массив, получен " + argType.toString());
+        }
+        setType(*expr.callee, Type::integer("int32", 32, false));
+        return Type::integer("int32", 32, false);
     }
 
     Symbol* sym = resolvePath(calleeName->path, expr);
@@ -835,6 +883,8 @@ bool Analyzer::canCast(const Type& from, const Type& to) const {
     if (from.isNumeric() && to.isNumeric()) return true;
     if (from.kind == Type::Kind::Bool && to.isNumeric()) return true;
     if (from.isNumeric() && to.kind == Type::Kind::Bool) return true;
+    if (from.kind == Type::Kind::Char && to.isNumeric()) return true;
+    if (from.isNumeric() && to.kind == Type::Kind::Char) return true;
     return false;
 }
 
@@ -843,6 +893,7 @@ bool Analyzer::isPrintable(const Type& type) const {
            type.kind == Type::Kind::UInt  ||
            type.kind == Type::Kind::Float ||
            type.kind == Type::Kind::Bool  ||
+           type.kind == Type::Kind::Char  ||
            type.kind == Type::Kind::String;
 }
 

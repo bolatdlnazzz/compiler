@@ -149,13 +149,13 @@ void Parser::synchronizeStatement() {
 }
 
 // Проверить: может ли токен использоваться как имя переменной или функции?
-// Включает: обычные идентификаторы И встроенные имена (print, input, len, exit, panic)
+// Включает: обычные идентификаторы И встроенные имена (print, input, len, exit, panic, assert)
 bool Parser::isNameLike(const Lexer::Token& tok) const {
     if (tok.type == Lexer::TokenType::Identifier) return true;
     // Встроенные имена, которые допускаются как обычные идентификаторы
     if (tok.type != Lexer::TokenType::Keyword) return false;
     return tok.lexeme == "print" || tok.lexeme == "input" || tok.lexeme == "exit" ||
-           tok.lexeme == "panic" || tok.lexeme == "unit" || tok.lexeme == "len";
+           tok.lexeme == "panic" || tok.lexeme == "assert" || tok.lexeme == "unit" || tok.lexeme == "len";
 }
 
 // Проверить: может ли токен использоваться как имя типа?
@@ -171,7 +171,7 @@ std::string Parser::expectIdentifierLike(std::string_view message) {
     // Встроенные имена тоже разрешены как идентификаторы в нужных позициях
     if (peek().type == Lexer::TokenType::Keyword &&
         (peek().lexeme == "print" || peek().lexeme == "input" ||
-         peek().lexeme == "exit" || peek().lexeme == "panic" || peek().lexeme == "len")) {
+         peek().lexeme == "exit" || peek().lexeme == "panic" || peek().lexeme == "assert" || peek().lexeme == "len")) {
         return advance().lexeme;
     }
     errorAt(peek(), message);
@@ -245,6 +245,21 @@ std::string Parser::decodeStringLiteral(std::string_view lexeme) {
         }
     }
     return result;
+}
+
+
+char Parser::decodeCharLiteral(std::string_view lexeme) {
+    if (lexeme.size() < 3) return '\0';
+    if (lexeme[1] != '\\') return lexeme[1];
+    if (lexeme.size() < 4) return '\0';
+    switch (lexeme[2]) {
+        case 'n': return '\n';
+        case 't': return '\t';
+        case '\'': return '\'';
+        case '\\': return '\\';
+        case '0': return '\0';
+        default: return lexeme[2];
+    }
 }
 
 // Точка входа парсера. Вызывается один раз и парсит весь исходный файл.
@@ -512,9 +527,18 @@ AST::TypePtr Parser::parseTypeExpr() {  // Парсить тип: имя, мас
         const auto& sizeTok = expect(Lexer::TokenType::IntLiteral, {}, "ожидался целочисленный размер массива");  // Ожидаем число
         if (panicMode_) return node;  // Ошибка парсинга числа
         std::uint64_t size = 0;  // Переменная для размера
-        auto begin = sizeTok.lexeme.data();  // Начало строки числа
-        auto end = sizeTok.lexeme.data() + sizeTok.lexeme.size();  // Конец строки числа
-        auto [ptr, ec] = std::from_chars(begin, end, size);  // Преобразуем строку в uint64_t
+        int base = 10;
+        std::string_view digits = sizeTok.lexeme;
+        if (digits.size() > 2 && digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X')) {
+            base = 16;
+            digits.remove_prefix(2);
+        } else if (digits.size() > 2 && digits[0] == '0' && (digits[1] == 'b' || digits[1] == 'B')) {
+            base = 2;
+            digits.remove_prefix(2);
+        }
+        auto begin = digits.data();  // Начало строки числа
+        auto end = digits.data() + digits.size();  // Конец строки числа
+        auto [ptr, ec] = std::from_chars(begin, end, size, base);  // Преобразуем строку в uint64_t
         if (ec != std::errc{} || ptr != end) {  // Если ошибка преобразования
             errorAt(sizeTok, "некорректный размер массива");  // Сообщаем ошибку
         }
@@ -863,6 +887,12 @@ AST::ExprPtr Parser::parsePrimary() {
     if (match(Lexer::TokenType::BoolLiteral)) {
         auto e = std::make_unique<AST::BoolLiteralExpr>();
         e->value = previous().lexeme == "true";
+        e->span = spanFrom(first, previous());
+        return e;
+    }
+    if (match(Lexer::TokenType::CharLiteral)) {
+        auto e = std::make_unique<AST::CharLiteralExpr>();
+        e->value = decodeCharLiteral(previous().lexeme);
         e->span = spanFrom(first, previous());
         return e;
     }

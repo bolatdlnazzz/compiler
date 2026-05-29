@@ -33,6 +33,7 @@ struct Type {
         Error,    // чтото сломалось
         Unit,     // () - "пустое" значение (возвращаемое функцией без return)
         Bool,     // true/false
+        Char,     // ASCII-символ
         String,   // "hello"
         Int,      // сигнированные целые: int32, int64
         UInt,     // бессигнированные целые: uint32
@@ -51,6 +52,7 @@ struct Type {
     static Type error();
     static Type unit();
     static Type boolean();
+    static Type character();
     static Type string();
     static Type integer(std::string name, int bits, bool isUnsigned);
     static Type floating(std::string name, int bits);

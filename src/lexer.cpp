@@ -107,6 +107,11 @@ bool Lexer::isDigit(char c) {
     return std::isdigit(uc) != 0;
 }
 
+bool Lexer::isHexDigit(char c) {
+    unsigned char uc = static_cast<unsigned char>(c);
+    return std::isxdigit(uc) != 0;
+}
+
 // Проверить: буква или цифра? (используется в идентификаторах типа myVar123)
 bool Lexer::isAlphaNumeric(char c) {
     return isAlpha(c) || isDigit(c);
@@ -183,6 +188,9 @@ Token Lexer::nextToken() {
     }
     if (c == '"') {
         return stringLiteral(startPos);  // строка
+    }
+    if (c == '\'') {
+        return charLiteral(startPos);    // символ
     }
 
     // ────────────────────────────────────────────────────────────────────────────
@@ -280,16 +288,19 @@ Token Lexer::identifierOrKeyword(Position startPos) {
 
     std::string lexeme = source_.substr(start, index_ - start);  // извлекаем текст токена
 
-    // Проверяем булевы литералы отдельно (это ключевые слова, но особого типа)
+    // Проверяем булевы и специальные float-литералы отдельно.
     if (lexeme == "true" || lexeme == "false") {
         return makeToken(TokenType::BoolLiteral, lexeme, startPos);
+    }
+    if (lexeme == "inf" || lexeme == "NaN" || lexeme == "nan") {
+        return makeToken(TokenType::FloatLiteral, lexeme == "nan" ? std::string("NaN") : lexeme, startPos);
     }
 
     // Таблица зарезервированных ключевых слов
     static const std::unordered_set<std::string> keywords = {
         "module", "namespace", "type", "struct", "fn", "let", "var",
         "if", "else", "while", "break", "continue", "return",
-        "as", "unit", "print", "input", "exit", "panic"
+        "as", "unit", "print", "input", "exit", "panic", "assert"
     };
 
     if (keywords.contains(lexeme)) {
@@ -313,26 +324,53 @@ Token Lexer::identifierOrKeyword(Position startPos) {
 //   - "3.14" → FloatLiteral
 //   - "10." → IntLiteral (точка без цифры не считается дробью)
 Token Lexer::number(Position startPos) {
-    std::size_t start = index_ - 1;  // запомнили начало числа
-    
-    // Целая часть: читаем все цифры
-    while (!isAtEnd() && isDigit(peek())) {
-        advance();
-    }
+    std::size_t start = index_ - 1;  // первый символ числа уже прочитан
 
-    // Проверяем наличие дробной части: точка, потом ЦИФРА
-    if (!isAtEnd() && peek() == '.' && isDigit(peekNext())) {
-        advance();  // пропускаем точку
-        // Дробная часть: читаем цифры после точки
-        while (!isAtEnd() && isDigit(peek())) {
-            advance();
+    // Шестнадцатеричные литералы: 0x2A / 0X2A
+    if (source_[start] == '0' && (peek() == 'x' || peek() == 'X')) {
+        advance(); // x/X
+        if (isAtEnd() || !isHexDigit(peek())) {
+            return errorToken("expected hexadecimal digits after 0x", startPos);
         }
-        // Число с точкой → это float
-        return makeToken(TokenType::FloatLiteral, source_.substr(start, index_ - start), startPos);
+        while (!isAtEnd() && isHexDigit(peek())) advance();
+        return makeToken(TokenType::IntLiteral, source_.substr(start, index_ - start), startPos);
     }
 
-    // Число без точки → это целое
-    return makeToken(TokenType::IntLiteral, source_.substr(start, index_ - start), startPos);
+    // Двоичные литералы: 0b101010 / 0B101010
+    if (source_[start] == '0' && (peek() == 'b' || peek() == 'B')) {
+        advance(); // b/B
+        if (isAtEnd() || (peek() != '0' && peek() != '1')) {
+            return errorToken("expected binary digits after 0b", startPos);
+        }
+        while (!isAtEnd() && (peek() == '0' || peek() == '1')) advance();
+        return makeToken(TokenType::IntLiteral, source_.substr(start, index_ - start), startPos);
+    }
+
+    bool isFloat = false;
+
+    // Целая часть
+    while (!isAtEnd() && isDigit(peek())) advance();
+
+    // Дробная часть: 3.14. Точку без цифры после неё оставляем оператором доступа.
+    if (!isAtEnd() && peek() == '.' && isDigit(peekNext())) {
+        isFloat = true;
+        advance(); // точка
+        while (!isAtEnd() && isDigit(peek())) advance();
+    }
+
+    // Экспонента: 1e3, 1.5e-2, 2E+10
+    if (!isAtEnd() && (peek() == 'e' || peek() == 'E')) {
+        isFloat = true;
+        advance(); // e/E
+        if (!isAtEnd() && (peek() == '+' || peek() == '-')) advance();
+        if (isAtEnd() || !isDigit(peek())) {
+            return errorToken("expected exponent digits in float literal", startPos);
+        }
+        while (!isAtEnd() && isDigit(peek())) advance();
+    }
+
+    return makeToken(isFloat ? TokenType::FloatLiteral : TokenType::IntLiteral,
+                     source_.substr(start, index_ - start), startPos);
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -380,6 +418,35 @@ Token Lexer::stringLiteral(Position startPos) {
     return errorToken("unterminated string literal", startPos);
 }
 
+Token Lexer::charLiteral(Position startPos) {
+    std::string lexeme;
+    lexeme.push_back('\'');
+
+    if (isAtEnd() || peek() == '\n') {
+        return errorToken("unterminated char literal", startPos);
+    }
+
+    char c = advance();
+    lexeme.push_back(c);
+
+    if (c == '\\') {
+        if (isAtEnd() || peek() == '\n') {
+            return errorToken("unterminated char literal", startPos);
+        }
+        char escaped = advance();
+        lexeme.push_back(escaped);
+        if (escaped != 'n' && escaped != 't' && escaped != '\'' && escaped != '\\' && escaped != '0') {
+            return errorToken("invalid escape sequence \\" + std::string(1, escaped), startPos);
+        }
+    }
+
+    if (!match('\'')) {
+        return errorToken("char literal must contain exactly one character", startPos);
+    }
+    lexeme.push_back('\'');
+    return makeToken(TokenType::CharLiteral, lexeme, startPos);
+}
+
 // Форматировать ошибку в стандартном формате: filename:line:column: error: message
 // Например: "hello.astra:5:10: error: unexpected character 'ñ'"
 // Этот формат IDE может автоматически разобрать и подсветить ошибку красной волнистой линией
@@ -401,6 +468,7 @@ std::string tokenTypeToString(TokenType type) {
         case TokenType::Keyword: return "Keyword";            // let, if, fn, while и т.д.
         case TokenType::IntLiteral: return "IntLiteral";       // 42, 123, 0
         case TokenType::FloatLiteral: return "FloatLiteral";   // 3.14, 2.5, 1.0
+        case TokenType::CharLiteral: return "CharLiteral";     // 'a', '\n'
         case TokenType::StringLiteral: return "StringLiteral"; // "hello", "world"
         case TokenType::BoolLiteral: return "BoolLiteral";     // true, false
         case TokenType::Operator: return "Operator";           // +, -, ==, &&, и т.д.

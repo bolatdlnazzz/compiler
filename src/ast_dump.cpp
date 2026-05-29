@@ -45,6 +45,7 @@ void dumpExpr(const AST::Expr* e, std::ostream& out, int pad) {
     if (auto* x = dynamic_cast<const AST::IntLiteralExpr*>(e)) { dumpExprHeader(e,out,pad,"IntLiteral " + x->lexeme); return; }
     if (auto* x = dynamic_cast<const AST::FloatLiteralExpr*>(e)) { dumpExprHeader(e,out,pad,"FloatLiteral " + x->lexeme); return; }
     if (auto* x = dynamic_cast<const AST::BoolLiteralExpr*>(e)) { dumpExprHeader(e,out,pad,std::string("BoolLiteral ") + (x->value ? "true" : "false")); return; }
+    if (auto* x = dynamic_cast<const AST::CharLiteralExpr*>(e)) { dumpExprHeader(e,out,pad,"CharLiteral " + std::to_string(static_cast<unsigned char>(x->value))); return; }
     if (auto* x = dynamic_cast<const AST::StringLiteralExpr*>(e)) { dumpExprHeader(e,out,pad,"StringLiteral \"" + x->value + "\""); return; }
     if (auto* x = dynamic_cast<const AST::NameExpr*>(e)) { dumpExprHeader(e,out,pad,"Name " + join(x->path)); return; }
     if (auto* x = dynamic_cast<const AST::UnaryExpr*>(e)) { dumpExprHeader(e,out,pad,"Unary " + x->op); dumpExpr(x->operand.get(),out,pad+2); return; }

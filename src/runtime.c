@@ -11,6 +11,7 @@ void astra_print_u64(uint64_t value) { printf("%llu\n", (unsigned long long)valu
 void astra_print_f32(float value) { printf("%g\n", value); }
 void astra_print_f64(double value) { printf("%g\n", value); }
 void astra_print_bool(int64_t value) { printf(value ? "true\n" : "false\n"); }
+void astra_print_char(int64_t value) { printf("%c\n", (unsigned char)value); }
 void astra_print_string(const char* value) { printf("%s\n", value ? value : ""); }
 
 // Читаем строку из stdin и возвращаем выделенную в heap копию.
@@ -35,6 +36,13 @@ void astra_exit(int32_t code) { exit(code); }
 void astra_panic(const char* message) {
     fprintf(stderr, "runtime error: %s\n", message ? message : "panic");
     exit(1);
+}
+
+void astra_assert(int64_t condition, int32_t line) {
+    if (!condition) {
+        fprintf(stderr, "runtime error: assertion failed at line %d\n", line);
+        exit(1);
+    }
 }
 
 // Строковые операции используют обычные C-строки.

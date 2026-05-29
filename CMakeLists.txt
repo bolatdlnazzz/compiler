@@ -13,18 +13,22 @@ option(ENABLE_DEBUG "Enable debug build" ON)
 
 add_subdirectory(src)
 
+# Удобная цель-алиас для ТЗ. Обычная сборка также работает через: cmake --build .
+add_custom_target(build DEPENDS astra)
+
 add_custom_target(run
-    COMMAND ${CMAKE_BINARY_DIR}/src/astra ${CMAKE_SOURCE_DIR}/examples/basics/main.astra
+    COMMAND $<TARGET_FILE:astra> ${CMAKE_SOURCE_DIR}/examples/tests/basic.astra --emit-asm -o ${CMAKE_BINARY_DIR}/basic.asm
     DEPENDS astra
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
 add_custom_target(debug
-    COMMAND gdb ${CMAKE_BINARY_DIR}/src/astra
+    COMMAND gdb $<TARGET_FILE:astra>
     DEPENDS astra
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
+# Цель clean создаётся CMake автоматически: cmake --build . --target clean
 add_custom_target(clean-all
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/*
 )

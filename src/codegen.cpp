@@ -163,7 +163,13 @@ std::string Generator::stringLabel(const std::string& value) {
 
 std::string Generator::floatLabel(const std::string& value, const std::string& type) {
     const std::string label = "LF" + std::to_string(floatData_.size());
-    floatData_.push_back(label + (type == "float32" ? ": dd " : ": dq ") + value);
+    std::string literal = value;
+    if (value == "inf") {
+        literal = (type == "float32") ? "0x7f800000" : "0x7ff0000000000000";
+    } else if (value == "NaN" || value == "nan") {
+        literal = (type == "float32") ? "0x7fc00000" : "0x7ff8000000000000";
+    }
+    floatData_.push_back(label + (type == "float32" ? ": dd " : ": dq ") + literal);
     return label;
 }
 
@@ -208,10 +214,12 @@ bool Generator::generate(AST::Module& module, const std::string& asmPath) {
     finalAsm += "extern astra_print_f32\n";
     finalAsm += "extern astra_print_f64\n";
     finalAsm += "extern astra_print_bool\n";
+    finalAsm += "extern astra_print_char\n";
     finalAsm += "extern astra_print_string\n";
     finalAsm += "extern astra_input_string\n";
     finalAsm += "extern astra_exit\n";
     finalAsm += "extern astra_panic\n";
+    finalAsm += "extern astra_assert\n";
     finalAsm += "extern astra_string_concat\n";
     finalAsm += "extern astra_string_eq\n";
     finalAsm += "extern astra_string_ne\n";
@@ -323,7 +331,7 @@ std::string Generator::exprType(const AST::Expr& expr) const {
 bool Generator::isFloatType(const std::string& type) const { return type == "float32" || type == "float64"; }
 bool Generator::isSignedIntType(const std::string& type) const { return startsWith(type, "int") && (type == "int8" || type == "int16" || type == "int32" || type == "int64"); }
 bool Generator::isUnsignedIntType(const std::string& type) const { return startsWith(type, "uint") && (type == "uint8" || type == "uint16" || type == "uint32" || type == "uint64"); }
-bool Generator::isIntegerType(const std::string& type) const { return isSignedIntType(type) || isUnsignedIntType(type); }
+bool Generator::isIntegerType(const std::string& type) const { return isSignedIntType(type) || isUnsignedIntType(type) || type == "char"; }
 bool Generator::isBoolType(const std::string& type) const { return type == "bool"; }
 bool Generator::isStringType(const std::string& type) const { return type == "string"; }
 bool Generator::isScalarType(const std::string& type) const { return isIntegerType(type) || isFloatType(type) || isBoolType(type) || isStringType(type) || type == "unit" || type.empty(); }
@@ -366,7 +374,7 @@ const Generator::FieldLayout* Generator::findField(const std::string& type, cons
 
 int Generator::typeSize(const std::string& type) const {
     if (type == "unit" || type.empty()) return 0;
-    if (type == "bool" || type == "int8" || type == "uint8") return 1;
+    if (type == "bool" || type == "char" || type == "int8" || type == "uint8") return 1;
     if (type == "int16" || type == "uint16") return 2;
     if (type == "int32" || type == "uint32" || type == "float32") return 4;
     if (type == "int64" || type == "uint64" || type == "float64" || type == "string") return 8;
@@ -569,6 +577,10 @@ void Generator::emitExpr(AST::Expr& expr, FunctionContext& ctx) {
     }
     if (auto* b = dynamic_cast<AST::BoolLiteralExpr*>(&expr)) {
         emit(std::string("    mov rax, ") + (b->value ? "1" : "0"));
+        return;
+    }
+    if (auto* ch = dynamic_cast<AST::CharLiteralExpr*>(&expr)) {
+        emit("    mov rax, " + std::to_string(static_cast<unsigned char>(ch->value)));
         return;
     }
     if (auto* s = dynamic_cast<AST::StringLiteralExpr*>(&expr)) {
@@ -969,6 +981,7 @@ void Generator::emitCall(AST::CallExpr& expr, FunctionContext& ctx) {
             emit("    mov rdi, rax");
             if (t == "string") emitCallInstruction(ctx, "astra_print_string");
             else if (t == "bool") emitCallInstruction(ctx, "astra_print_bool");
+            else if (t == "char") emitCallInstruction(ctx, "astra_print_char");
             else if (t == "uint32") emitCallInstruction(ctx, "astra_print_u32");
             else if (t == "uint64") emitCallInstruction(ctx, "astra_print_u64");
             else if (t == "int64") emitCallInstruction(ctx, "astra_print_i64");
@@ -983,10 +996,25 @@ void Generator::emitCall(AST::CallExpr& expr, FunctionContext& ctx) {
     }
     if (calleeName->path.size() == 1 && name == "len") {
         if (expr.args.size() == 1) {
+            const std::string argType = exprType(*expr.args[0]);
+            if (auto arr = parseArrayType(argType); arr.valid) {
+                emit("    mov rax, " + std::to_string(arr.size));
+            } else {
+                emitExpr(*expr.args[0], ctx);
+                emit("    mov rdi, rax");
+                emitCallInstruction(ctx, "astra_string_len");
+            }
+        }
+        return;
+    }
+    if (calleeName->path.size() == 1 && name == "assert") {
+        if (expr.args.size() == 1) {
             emitExpr(*expr.args[0], ctx);
             emit("    mov rdi, rax");
-            emitCallInstruction(ctx, "astra_string_len");
+            emit("    mov esi, " + std::to_string(expr.span.begin.line));
+            emitCallInstruction(ctx, "astra_assert");
         }
+        emit("    xor rax, rax");
         return;
     }
     if (calleeName->path.size() == 1 && name == "exit") {
@@ -1213,7 +1241,7 @@ void Generator::emitCopyBytes(const std::string& dstReg, const std::string& srcR
 void Generator::emitLoadFromAddress(const std::string& reg, const std::string& type) {
     if (type == "float32") { emit("    movss xmm0, " + mem(reg)); return; }
     if (type == "float64") { emit("    movsd xmm0, " + mem(reg)); return; }
-    if (type == "bool" || type == "uint8") emit("    movzx rax, byte " + mem(reg));
+    if (type == "bool" || type == "char" || type == "uint8") emit("    movzx rax, byte " + mem(reg));
     else if (type == "int8") emit("    movsx rax, byte " + mem(reg));
     else if (type == "uint16") emit("    movzx rax, word " + mem(reg));
     else if (type == "int16") emit("    movsx rax, word " + mem(reg));
@@ -1226,14 +1254,14 @@ void Generator::emitStoreToAddress(const std::string& reg, const std::string& ty
     if (type == "float32") { emit("    movss " + mem(reg) + ", xmm0"); return; }
     if (type == "float64") { emit("    movsd " + mem(reg) + ", xmm0"); return; }
     emitNormalizeInteger(type);
-    if (type == "bool" || type == "int8" || type == "uint8") emit("    mov byte " + mem(reg) + ", al");
+    if (type == "bool" || type == "char" || type == "int8" || type == "uint8") emit("    mov byte " + mem(reg) + ", al");
     else if (type == "int16" || type == "uint16") emit("    mov word " + mem(reg) + ", ax");
     else if (type == "int32" || type == "uint32") emit("    mov dword " + mem(reg) + ", eax");
     else if (type != "unit") emit("    mov qword " + mem(reg) + ", rax");
 }
 
 void Generator::emitNormalizeInteger(const std::string& type) {
-    if (type == "bool" || type == "uint8") emit("    movzx rax, al");
+    if (type == "bool" || type == "char" || type == "uint8") emit("    movzx rax, al");
     else if (type == "int8") emit("    movsx rax, al");
     else if (type == "uint16") emit("    movzx rax, ax");
     else if (type == "int16") emit("    movsx rax, ax");

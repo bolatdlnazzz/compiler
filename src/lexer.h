@@ -1,8 +1,5 @@
 #pragma once
 
-// ЛЕКСИЧЕСКИЙ АНАЛИЗАТОР (LEXER)
-// Лексер разбивает исходный текст на токены
-// Токен - это минимальная смысловая единица: слово, число, оператор, скобка
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -15,7 +12,8 @@ enum class TokenType {
     Identifier,        // имя переменной, функции, структуры, типа и так далее, то есть переменные, функции: x, foo, myVar
     Keyword,           // зарезервированные слова: let, if, while, fn
     IntLiteral,        // целые числа: 42, 0, 999
-    FloatLiteral,      // числа с плавающей точкой: 3.14, 0.5
+    FloatLiteral,      // числа с плавающей точкой: 3.14, 0.5, 1e3, inf, NaN
+    CharLiteral,       // символьные литералы: 'a', '\n'
     StringLiteral,     // строковые литералы: строки: "hello", "world"
     BoolLiteral,       // логические значения: true или false
     Operator,          // это символ или последовательность символов, которые обозначают действие: +, -, *, /, ==, !=, &&, ||, etc.
@@ -79,6 +77,7 @@ private: //Всё, что находится в private, доступно тол
     Token identifierOrKeyword(Position startPos);  // читает слова: "let", "x", "foo". Сначала лексер читает последовательность букв, цифр и _. Потом проверяет: это true или false? это ключевое слово? или это обычный идентификатор?
     Token number(Position startPos);               // читает числа: "42", "3.14"
     Token stringLiteral(Position startPos);        // читает строки: "hello"
+    Token charLiteral(Position startPos);          // читает символы: 'a', '\n'
 
     // Пропуск ненужных символов
     void skipWhitespace();           // пропустить пробелы, табуляции, переводы строк
@@ -88,6 +87,7 @@ private: //Всё, что находится в private, доступно тол
     // Проверка типов символов
     static bool isAlpha(char c);      // буква или подчеркивание? нужна для идентификаторов и ключевых слов 
     static bool isDigit(char c);      // цифра?
+    static bool isHexDigit(char c);   // шестнадцатеричная цифра?
     static bool isAlphaNumeric(char c);  // буква или цифра?
 };
 

@@ -84,6 +84,10 @@ struct BoolLiteralExpr final : Expr {
     bool value = false;
 };
 
+struct CharLiteralExpr final : Expr {
+    char value = '\0';
+};
+
 struct StringLiteralExpr final : Expr {
     // Декодированное значение без внешних кавычек.
     std::string value;
