@@ -117,6 +117,19 @@ depend:
 .PHONY : depend
 
 #=============================================================================
+# Target rules for targets named build
+
+# Build rule for target.
+build: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 build
+.PHONY : build
+
+# fast build rule for target.
+build/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/build.dir/build.make CMakeFiles/build.dir/build
+.PHONY : build/fast
+
+#=============================================================================
 # Target rules for targets named run
 
 # Build rule for target.
@@ -176,6 +189,7 @@ help:
 	@echo "... depend"
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
+	@echo "... build"
 	@echo "... clean-all"
 	@echo "... debug"
 	@echo "... run"

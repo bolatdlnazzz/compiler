@@ -8,7 +8,6 @@
 #include <vector>
 
 namespace Codegen {
-
 struct Diagnostic {
     std::string file;
     Lexer::Position pos{};
@@ -23,10 +22,8 @@ struct Options {
 class Generator {
 public:
     explicit Generator(std::string fileName = "<input>");
-
     bool generate(AST::Module& module, const std::string& asmPath);
     const std::vector<Diagnostic>& diagnostics() const noexcept { return diagnostics_; }
-
 private:
     struct Local {
         int offset = 0;
@@ -34,7 +31,6 @@ private:
         int align = 1;
         std::string type;
     };
-
     struct FieldLayout {
         std::string name;
         std::string type;
@@ -42,7 +38,6 @@ private:
         int size = 0;
         int align = 1;
     };
-
     struct StructLayout {
         std::string name;
         int size = 0;
@@ -50,15 +45,12 @@ private:
         std::vector<FieldLayout> fields;
         std::unordered_map<std::string, std::size_t> indexByName;
     };
-
     struct ArrayInfo {
         std::string elementType;
         std::uint64_t size = 0;
         bool valid = false;
     };
-
     struct FunctionContext;
-
     std::string fileName_;
     std::vector<Diagnostic> diagnostics_;
     std::string asm_;
@@ -69,7 +61,6 @@ private:
     std::unordered_map<std::string, StructLayout> structs_;
     std::unordered_map<std::string, std::string> aliases_;
     int labelCounter_ = 0;
-
     void addDiagnostic(const AST::Node& node, std::string message);
     void emit(std::string line);
     std::string freshLabel(std::string prefix);
@@ -83,18 +74,15 @@ private:
     static std::string trim(std::string value);
     static int alignTo(int value, int alignment);
     static bool startsWith(const std::string& value, const std::string& prefix);
-
     void collectSymbols(AST::Module& module);
     void collectSymbolsInDecl(AST::Decl& decl);
     void collectFunctionLabel(const AST::FunctionDecl& fn);
     void collectStructLayout(const AST::StructDecl& st);
     void collectAlias(const AST::TypeAliasDecl& alias);
-
     void emitModule(AST::Module& module);
     void emitDecl(AST::Decl& decl);
     void emitNamespace(AST::NamespaceDecl& decl);
     void emitFunction(AST::FunctionDecl& fn);
-
     std::string typeExprToString(const AST::TypeExpr& typeExpr) const;
     std::string resolveNamedType(const std::vector<std::string>& path) const;
     std::string exprType(const AST::Expr& expr) const;
@@ -111,16 +99,13 @@ private:
     ArrayInfo parseArrayType(const std::string& type) const;
     const StructLayout* findStruct(const std::string& type) const;
     const FieldLayout* findField(const std::string& type, const std::string& field) const;
-
     int computeFrameSize(AST::FunctionDecl& fn);
     void scanBlockForFrame(AST::BlockStmt& block, FunctionContext& ctx);
     void scanStmtForFrame(AST::Stmt& stmt, FunctionContext& ctx);
-
     void emitBlock(AST::BlockStmt& block, FunctionContext& ctx, bool createScope = true);
     void emitStmt(AST::Stmt& stmt, FunctionContext& ctx);
     void emitIf(AST::IfStmt& stmt, FunctionContext& ctx);
     void emitWhile(AST::WhileStmt& stmt, FunctionContext& ctx);
-
     void emitExpr(AST::Expr& expr, FunctionContext& ctx);
     void emitCall(AST::CallExpr& expr, FunctionContext& ctx);
     void emitBinary(AST::BinaryExpr& expr, FunctionContext& ctx);
@@ -128,7 +113,6 @@ private:
     void emitLogicalAnd(AST::BinaryExpr& expr, FunctionContext& ctx);
     void emitLogicalOr(AST::BinaryExpr& expr, FunctionContext& ctx);
     void emitCast(AST::CastExpr& expr, FunctionContext& ctx);
-
     void emitAddressOf(AST::Expr& expr, FunctionContext& ctx);
     void emitStoreToLValue(AST::Expr& target, const std::string& valueType, FunctionContext& ctx);
     void emitInitToAddress(AST::Expr& expr, const std::string& targetType, FunctionContext& ctx);
@@ -137,7 +121,6 @@ private:
     void emitStoreToAddress(const std::string& reg, const std::string& type);
     void emitNormalizeInteger(const std::string& type);
     void emitCallInstruction(FunctionContext& ctx, const std::string& callee);
-    // Вызов функции, возвращающей агрегат; rdi = адрес назначения
     void emitCallAggregateDest(AST::Expr& callExpr, const std::string& targetType, FunctionContext& ctx);
     void emitPush(FunctionContext& ctx, const std::string& reg);
     void emitPop(FunctionContext& ctx, const std::string& reg);
@@ -146,5 +129,4 @@ private:
 };
 
 std::string formatDiagnostic(const Diagnostic& diagnostic);
-
-} // namespace Codegen
+}

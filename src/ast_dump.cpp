@@ -1,14 +1,9 @@
 #include "ast_dump.h"
-
 #include <string>
 
 namespace ASTDump {
-
 namespace {
-
-// Узлы печатаются рекурсивно, с отступом для вложенных частей.
 std::string ind(int n) { return std::string(static_cast<std::size_t>(n), ' '); }
-
 std::string join(const std::vector<std::string>& path) {
     std::string r;
     for (const auto& p : path) {
@@ -17,7 +12,6 @@ std::string join(const std::vector<std::string>& path) {
     }
     return r;
 }
-
 void dumpType(const AST::TypeExpr* t, std::ostream& out) {
     if (!t) { out << "<inferred>"; return; }
     if (auto* n = dynamic_cast<const AST::NamedType*>(t)) { out << join(n->path); return; }
@@ -29,17 +23,14 @@ void dumpType(const AST::TypeExpr* t, std::ostream& out) {
     }
     out << "<type>";
 }
-
 void dumpExpr(const AST::Expr* e, std::ostream& out, int pad);
 void dumpStmt(const AST::Stmt* s, std::ostream& out, int pad);
 void dumpDecl(const AST::Decl* d, std::ostream& out, int pad);
-
 void dumpExprHeader(const AST::Expr* e, std::ostream& out, int pad, const std::string& name) {
     out << ind(pad) << name;
     if (e && e->semanticType) out << " : " << *e->semanticType;
     out << "\n";
 }
-
 void dumpExpr(const AST::Expr* e, std::ostream& out, int pad) {
     if (!e) { out << ind(pad) << "<null expr>\n"; return; }
     if (auto* x = dynamic_cast<const AST::IntLiteralExpr*>(e)) { dumpExprHeader(e,out,pad,"IntLiteral " + x->lexeme); return; }
@@ -58,12 +49,10 @@ void dumpExpr(const AST::Expr* e, std::ostream& out, int pad) {
     if (auto* x = dynamic_cast<const AST::StructLiteralExpr*>(e)) { dumpExprHeader(e,out,pad,"StructLiteral " + join(x->typePath)); for (auto& f: x->fields) { out << ind(pad+2) << f.name << "\n"; dumpExpr(f.value.get(),out,pad+4);} return; }
     dumpExprHeader(e,out,pad,"<expr>");
 }
-
 void dumpBlock(const AST::BlockStmt* b, std::ostream& out, int pad) {
     out << ind(pad) << "Block\n";
     for (auto& s : b->statements) dumpStmt(s.get(), out, pad + 2);
 }
-
 void dumpStmt(const AST::Stmt* s, std::ostream& out, int pad) {
     if (dynamic_cast<const AST::EmptyStmt*>(s)) { out << ind(pad) << "EmptyStmt\n"; return; }
     if (auto* b = dynamic_cast<const AST::BlockStmt*>(s)) return dumpBlock(b,out,pad);
@@ -78,7 +67,6 @@ void dumpStmt(const AST::Stmt* s, std::ostream& out, int pad) {
     if (auto* x = dynamic_cast<const AST::ReturnStmt*>(s)) { out << ind(pad) << "Return\n"; dumpExpr(x->value.get(),out,pad+2); return; }
     out << ind(pad) << "<stmt>\n";
 }
-
 void dumpDecl(const AST::Decl* d, std::ostream& out, int pad) {
     if (auto* ns = dynamic_cast<const AST::NamespaceDecl*>(d)) { out << ind(pad) << "Namespace " << ns->name << "\n"; for (auto& c: ns->decls) dumpDecl(c.get(),out,pad+2); return; }
     if (auto* t = dynamic_cast<const AST::TypeAliasDecl*>(d)) { out << ind(pad) << "TypeAlias " << t->name << " = "; dumpType(t->aliasedType.get(),out); out << "\n"; return; }
@@ -86,8 +74,7 @@ void dumpDecl(const AST::Decl* d, std::ostream& out, int pad) {
     if (auto* f = dynamic_cast<const AST::FunctionDecl*>(d)) { out << ind(pad) << "Function " << f->name << " -> "; dumpType(f->returnType.get(),out); out << "\n"; for (auto& p: f->params) { out << ind(pad+2) << "Param " << p.name << ": "; dumpType(p.type.get(),out); out << "\n"; } dumpBlock(f->body.get(),out,pad+2); return; }
     out << ind(pad) << "<decl>\n";
 }
-
-} // namespace
+}
 
 void dumpModule(const AST::Module& module, std::ostream& out) {
     out << "Module";
@@ -95,5 +82,4 @@ void dumpModule(const AST::Module& module, std::ostream& out) {
     out << "\n";
     for (auto& d : module.decls) dumpDecl(d.get(), out, 2);
 }
-
-} // namespace ASTDump
+}

@@ -7,11 +7,8 @@
 #include <utility>
 
 namespace Codegen {
-
-// Сначала собираем информацию о типах и символах, потом пишем итоговый asm.
 struct Generator::FunctionContext {
     explicit FunctionContext(Generator& g) : gen(g) {}
-
     Generator& gen;
     std::vector<std::unordered_map<std::string, Local>> scopes;
     std::vector<std::string> breakLabels;
@@ -19,10 +16,8 @@ struct Generator::FunctionContext {
     std::string returnLabel;
     int nextOffset = 0;
     int stackBytes = 0;
-
     void pushScope() { scopes.emplace_back(); }
     void popScope() { scopes.pop_back(); }
-
     Local addLocal(const std::string& name, std::string type) {
         const int size = std::max(1, gen.typeSize(type));
         const int align = std::max(1, gen.typeAlign(type));
@@ -33,7 +28,6 @@ struct Generator::FunctionContext {
         scopes.back()[name] = local;
         return local;
     }
-
     const Local* findLocal(const std::string& name) const {
         for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
             auto found = it->find(name);
@@ -44,7 +38,6 @@ struct Generator::FunctionContext {
 };
 
 Generator::Generator(std::string fileName) : fileName_(std::move(fileName)) {}
-
 void Generator::addDiagnostic(const AST::Node& node, std::string message) {
     diagnostics_.push_back(Diagnostic{fileName_, node.span.begin, std::move(message)});
 }
@@ -137,7 +130,6 @@ std::string Generator::escapeNasmStringBytes(const std::string& value) {
         out << '"';
         chunk.clear();
     };
-
     for (unsigned char c : value) {
         if (c >= 32 && c <= 126 && c != '"' && c != '\\') {
             chunk.push_back(static_cast<char>(c));
@@ -193,13 +185,10 @@ bool Generator::generate(AST::Module& module, const std::string& asmPath) {
     structs_.clear();
     aliases_.clear();
     labelCounter_ = 0;
-
     collectSymbols(module);
     namespaceStack_.clear();
     emitModule(module);
-
     if (!diagnostics_.empty()) return false;
-
     std::string finalAsm;
     finalAsm += "default rel\n";
     finalAsm += "section .data\n";
@@ -227,7 +216,6 @@ bool Generator::generate(AST::Module& module, const std::string& asmPath) {
     finalAsm += "extern astra_rt_div_zero\n";
     finalAsm += "extern astra_rt_oob\n";
     finalAsm += asm_;
-
     std::ofstream out(asmPath);
     if (!out) {
         diagnostics_.push_back(Diagnostic{fileName_, {}, "не удалось открыть файл вывода asm: " + asmPath});
@@ -336,7 +324,6 @@ bool Generator::isBoolType(const std::string& type) const { return type == "bool
 bool Generator::isStringType(const std::string& type) const { return type == "string"; }
 bool Generator::isScalarType(const std::string& type) const { return isIntegerType(type) || isFloatType(type) || isBoolType(type) || isStringType(type) || type == "unit" || type.empty(); }
 bool Generator::isAggregateType(const std::string& type) const { return parseArrayType(type).valid || findStruct(type); }
-
 Generator::ArrayInfo Generator::parseArrayType(const std::string& rawType) const {
     const std::string type = trim(rawType);
     if (type.size() < 5 || type.front() != '[' || type.back() != ']') return {};
@@ -427,16 +414,13 @@ void Generator::emitFunction(AST::FunctionDecl& fn) {
     const std::string qualified = currentPrefix().empty() ? fn.name : currentPrefix() + "::" + fn.name;
     const std::string label = asmSymbolForQualifiedName(qualified);
     const int frameSize = computeFrameSize(fn);
-
     FunctionContext ctx(*this);
     ctx.returnLabel = freshLabel("return_");
     ctx.pushScope();
-
     emit(label + ":");
     emit("    push rbp");
     emit("    mov rbp, rsp");
     if (frameSize > 0) emit("    sub rsp, " + std::to_string(frameSize));
-
     static const char* intArgRegs[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
     static const char* xmmArgRegs[] = {"xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"};
     std::size_t intArg = 0;
@@ -464,7 +448,6 @@ void Generator::emitFunction(AST::FunctionDecl& fn) {
             }
         }
     }
-
     emitBlock(*fn.body, ctx, false);
     emit(ctx.returnLabel + ":");
     emit("    mov rsp, rbp");
@@ -625,16 +608,11 @@ void Generator::emitExpr(AST::Expr& expr, FunctionContext& ctx) {
     if (auto* cast = dynamic_cast<AST::CastExpr*>(&expr)) return emitCast(*cast, ctx);
     if (auto* call = dynamic_cast<AST::CallExpr*>(&expr)) return emitCall(*call, ctx);
     if (dynamic_cast<AST::ArrayLiteralExpr*>(&expr) || dynamic_cast<AST::StructLiteralExpr*>(&expr)) {
-        // Материализуем агрегатный литерал во временную память на стеке.
-        // После этого rax указывает на временный объект.
         const int sz = std::max(8, alignTo(typeSize(type), 8));
         emit("    sub rsp, " + std::to_string(sz));
         emit("    mov rdi, rsp");
         emitInitToAddress(expr, type, ctx);
         emit("    mov rax, rsp");
-        // Примечание: после использования стек не восстанавливается здесь —
-        // вызывающий код (return, call) сам управляет стеком через emitInitToAddress.
-        // Для безопасности сразу восстанавливаем, а адрес уже в rax.
         emit("    add rsp, " + std::to_string(sz));
         return;
     }
@@ -658,11 +636,9 @@ void Generator::emitBinary(AST::BinaryExpr& expr, FunctionContext& ctx) {
     if (expr.op == "&&") return emitLogicalAnd(expr, ctx);
     if (expr.op == "||") return emitLogicalOr(expr, ctx);
     const std::string type = exprType(expr);
-
     if (isFloatType(exprType(*expr.left)) || isFloatType(exprType(*expr.right))) {
         return emitFloatBinary(expr, ctx, exprType(*expr.left));
     }
-
     if (type == "string") {
         if (expr.op == "+") {
             emitExpr(*expr.left, ctx);
@@ -684,30 +660,17 @@ void Generator::emitBinary(AST::BinaryExpr& expr, FunctionContext& ctx) {
             return;
         }
     }
-
     if (isAggregateType(exprType(*expr.left)) && (expr.op == "==" || expr.op == "!=")) {
-        // Покомпонентное сравнение агрегатов.
-        // Алгоритм: сохраняем адреса обоих операндов, затем сравниваем
-        // элементы/поля по одному; при первом несовпадении выходим с 0.
         const std::string leftType = exprType(*expr.left);
         const bool isEq = (expr.op == "==");
         const std::string trueLabel  = freshLabel("agg_eq_true_");
         const std::string falseLabel = freshLabel("agg_eq_false_");
         const std::string endLabel   = freshLabel("agg_eq_end_");
-
-        // Получаем адрес левого операнда → rsi
         emitAddressOf(*expr.left, ctx);
-        emitPush(ctx, "rax");  // сохраняем адрес левого
-
-        // Получаем адрес правого операнда → rdx
+        emitPush(ctx, "rax");
         emitAddressOf(*expr.right, ctx);
         emit("    mov rdx, rax");
-
-        emitPop(ctx, "rsi");  // адрес левого
-
-        // Генерируем побайтовое сравнение для массива или по полям для структуры.
-        // Используем подход: сравниваем последовательно каждый элемент/поле.
-        // rsi = адрес левого, rdx = адрес правого
+        emitPop(ctx, "rsi");
         const ArrayInfo arrInfo = parseArrayType(leftType);
         if (arrInfo.valid) {
             const int elemSize = std::max(1, typeSize(arrInfo.elementType));
@@ -723,7 +686,6 @@ void Generator::emitBinary(AST::BinaryExpr& expr, FunctionContext& ctx) {
                     }
                     emit("    jne " + falseLabel);
                 } else {
-                    // Сравниваем целочисленный элемент нужного размера
                     if (elemSize == 1) {
                         emit("    mov al, byte [rsi + " + std::to_string(off) + "]");
                         emit("    cmp al, byte [rdx + " + std::to_string(off) + "]");
@@ -752,11 +714,9 @@ void Generator::emitBinary(AST::BinaryExpr& expr, FunctionContext& ctx) {
                     }
                     emit("    jne " + falseLabel);
                 } else if (isAggregateType(fl.type)) {
-                    // Вложенный агрегат: сравниваем побайтово через rep cmpsb
                     const int sz = std::max(1, typeSize(fl.type));
                     emit("    lea rdi, [rsi + " + std::to_string(fl.offset) + "]");
                     emit("    lea rcx, [rdx + " + std::to_string(fl.offset) + "]");
-                    // Побайтовое сравнение sz байт
                     for (int b = 0; b < sz; b += 8) {
                         const int chunk = std::min(8, sz - b);
                         if (chunk == 8) {
@@ -790,7 +750,6 @@ void Generator::emitBinary(AST::BinaryExpr& expr, FunctionContext& ctx) {
                 }
             }
         } else {
-            // Неизвестный агрегатный тип: побайтово по размеру
             const int sz = std::max(1, typeSize(leftType));
             for (int b = 0; b < sz; ++b) {
                 emit("    mov al, byte [rsi + " + std::to_string(b) + "]");
@@ -798,8 +757,6 @@ void Generator::emitBinary(AST::BinaryExpr& expr, FunctionContext& ctx) {
                 emit("    jne " + falseLabel);
             }
         }
-
-        // Все сравнения прошли — равны
         emit(trueLabel + ":");
         emit(isEq ? "    mov rax, 1" : "    xor rax, rax");
         emit("    jmp " + endLabel);
@@ -808,13 +765,11 @@ void Generator::emitBinary(AST::BinaryExpr& expr, FunctionContext& ctx) {
         emit(endLabel + ":");
         return;
     }
-
     emitExpr(*expr.left, ctx);
     emitPush(ctx, "rax");
     emitExpr(*expr.right, ctx);
     emit("    mov rbx, rax");
     emitPop(ctx, "rax");
-
     const auto& op = expr.op;
     const std::string operandType = exprType(*expr.left);
     if (op == "+") emit("    add rax, rbx");
@@ -870,7 +825,6 @@ void Generator::emitFloatBinary(AST::BinaryExpr& expr, FunctionContext& ctx, con
     else emit("    movsd xmm1, [rsp]");
     emit("    add rsp, 8");
     ctx.stackBytes -= 8;
-
     const std::string suffix = f32 ? "ss" : "sd";
     const auto& op = expr.op;
     if (op == "+") emit("    add" + suffix + " xmm1, xmm0");
@@ -932,7 +886,6 @@ void Generator::emitCast(AST::CastExpr& expr, FunctionContext& ctx) {
     const std::string to = exprType(expr);
     emitExpr(*expr.value, ctx);
     if (from == to) return;
-
     if (isIntegerType(from) && isIntegerType(to)) {
         emitNormalizeInteger(to);
         return;
@@ -966,7 +919,6 @@ void Generator::emitCall(AST::CallExpr& expr, FunctionContext& ctx) {
         emit("    xor rax, rax");
         return;
     }
-
     const std::string name = joinPath(calleeName->path);
     if (calleeName->path.size() == 1 && name == "print") {
         if (expr.args.size() != 1) {
@@ -1033,13 +985,11 @@ void Generator::emitCall(AST::CallExpr& expr, FunctionContext& ctx) {
         }
         return;
     }
-
     static const char* intArgRegs[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
     static const char* xmmArgRegs[] = {"xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"};
     std::size_t intCount = 0;
     std::size_t xmmCount = 0;
     int aggregateTempBytes = 0;
-
     struct SavedArg { bool isFloat = false; std::string type; std::size_t regIndex = 0; };
     std::vector<SavedArg> saved;
     for (auto& arg : expr.args) {
@@ -1139,7 +1089,6 @@ void Generator::emitAddressOf(AST::Expr& expr, FunctionContext& ctx) {
         emit("    add rax, rbx");
         return;
     }
-    // Для агрегатных выражений: материализуем во временный буфер стека
     const std::string exprT = exprType(expr);
     if (isAggregateType(exprT)) {
         const int sz = std::max(8, alignTo(typeSize(exprT), 8));
@@ -1153,7 +1102,6 @@ void Generator::emitAddressOf(AST::Expr& expr, FunctionContext& ctx) {
     addDiagnostic(expr, "выражение не имеет адреса для codegen");
     emit("    xor rax, rax");
 }
-
 
 void Generator::emitStoreToLValue(AST::Expr& target, const std::string& valueType, FunctionContext& ctx) {
     emitPush(ctx, "rax");
@@ -1196,9 +1144,7 @@ void Generator::emitInitToAddress(AST::Expr& expr, const std::string& targetType
         return;
     }
     if (isAggregateType(targetType)) {
-        // Если это вызов функции, возвращающей агрегат — передаём скрытый указатель
         if (dynamic_cast<AST::CallExpr*>(&expr)) {
-            // rdi уже содержит адрес назначения; передаём его как скрытый первый аргумент
             emitCallAggregateDest(expr, targetType, ctx);
             return;
         }
@@ -1289,11 +1235,7 @@ void Generator::emitPop(FunctionContext& ctx, const std::string& reg) {
     ctx.stackBytes -= 8;
 }
 
-
-// Вызов функции возвращающей агрегат с передачей скрытого указателя назначения.
-// По ABI: первый аргумент (rdi) = адрес буфера для результата.
-// Вызывающий сохраняет rdi перед вычислением остальных аргументов.
-void Generator::emitCallAggregateDest(AST::Expr& callExprBase, const std::string& /*targetType*/, FunctionContext& ctx) {
+void Generator::emitCallAggregateDest(AST::Expr& callExprBase, const std::string& , FunctionContext& ctx) {
     auto* callExpr = dynamic_cast<AST::CallExpr*>(&callExprBase);
     if (!callExpr) {
         addDiagnostic(callExprBase, "emitCallAggregateDest: ожидался CallExpr");
@@ -1304,18 +1246,13 @@ void Generator::emitCallAggregateDest(AST::Expr& callExprBase, const std::string
         addDiagnostic(*callExpr, "codegen поддерживает вызов только по имени функции");
         return;
     }
-
-    // Сохраняем rdi (адрес назначения) на стеке
     emitPush(ctx, "rdi");
-
     static const char* intArgRegs[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
     static const char* xmmArgRegs[] = {"xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"};
     std::size_t intCount = 0;
     std::size_t xmmCount = 0;
-
     struct SavedArg { bool isFloat = false; std::string type; std::size_t regIndex = 0; };
     std::vector<SavedArg> saved;
-
     for (auto& arg : callExpr->args) {
         const std::string t = exprType(*arg);
         if (isFloatType(t)) {
@@ -1332,10 +1269,6 @@ void Generator::emitCallAggregateDest(AST::Expr& callExprBase, const std::string
             saved.push_back({false, t, intCount++});
         }
     }
-
-    // Восстанавливаем аргументы в регистры ABI, первый целочисленный слот занят rdi (скрытый ptr)
-    // rdi = адрес назначения — берём его первым
-    // Поэтому остальные аргументы идут начиная с rsi
     for (std::size_t i = saved.size(); i > 0; --i) {
         const auto& arg = saved[i - 1];
         if (arg.isFloat) {
@@ -1344,21 +1277,17 @@ void Generator::emitCallAggregateDest(AST::Expr& callExprBase, const std::string
             emit("    add rsp, 8");
             ctx.stackBytes -= 8;
         } else {
-            // Сдвигаем на один регистр вперёд (rdi занят под скрытый ptr)
             const std::size_t realIdx = arg.regIndex + 1;
             if (realIdx < 6) emitPop(ctx, intArgRegs[realIdx]);
-            else emit("    add rsp, 8"), ctx.stackBytes -= 8;  // лишний — убираем
+            else emit("    add rsp, 8"), ctx.stackBytes -= 8;
         }
     }
-    // Восстанавливаем rdi = адрес назначения
     emitPop(ctx, "rdi");
     emitCallInstruction(ctx, asmSymbolForPath(calleeName->path));
-    // rax после вызова не используется; результат уже в rdi-буфере
 }
 
 std::string formatDiagnostic(const Diagnostic& diagnostic) {
     return diagnostic.file + ":" + std::to_string(diagnostic.pos.line) + ":" +
            std::to_string(diagnostic.pos.column) + ": error: " + diagnostic.message;
 }
-
-} // namespace Codegen
+}

@@ -1,13 +1,5 @@
 #pragma once
 
-// АБСТРАКТНОЕ СИНТАКСИЧЕСКОЕ ДЕРЕВО (AST)
-// AST - это дерево, которое представляет структуру программы.
-// Каждый узел дерева - это класс, снабженный данными для репрезентации части программы.
-// После каждого этапа AST оно становится усложненным:
-// - Парсер: строит дерево из токенов
-// - Семантика: каждый узел помечается типом данных (semanticType)
-// - Кодеген: AST трансплицируется в ассемблер
-
 #include "lexer.h"
 
 #include <cstdint>
@@ -17,7 +9,6 @@
 #include <vector>
 
 namespace AST {
-
 struct SourceSpan {
     std::string file;
     Lexer::Position begin{};
@@ -34,7 +25,6 @@ struct TypeExpr : Node {
 };
 
 struct Expr : Node {
-    // Заполняется на семантической фазе каноническим именем типа.
     std::optional<std::string> semanticType;
     virtual ~Expr() = default;
 };
@@ -51,16 +41,13 @@ using TypePtr = std::unique_ptr<TypeExpr>;
 using ExprPtr = std::unique_ptr<Expr>;
 using StmtPtr = std::unique_ptr<Stmt>;
 using DeclPtr = std::unique_ptr<Decl>;
-
 struct Module final : Node {
-    // Явное имя модуля из заголовка `module Name;`.
-    // Если пусто, файл всё равно считается модулем по имени исходного файла.
     std::vector<std::string> namePath;
     std::vector<DeclPtr> decls;
 };
 
 struct NamedType final : TypeExpr {
-    std::vector<std::string> path;   // int32 / Geometry::Point / unit
+    std::vector<std::string> path;
 };
 
 struct ArrayType final : TypeExpr {
@@ -69,7 +56,7 @@ struct ArrayType final : TypeExpr {
 };
 
 struct NameExpr final : Expr {
-    std::vector<std::string> path;   // x / Geometry::manhattan / print
+    std::vector<std::string> path;
 };
 
 struct IntLiteralExpr final : Expr {
@@ -89,7 +76,6 @@ struct CharLiteralExpr final : Expr {
 };
 
 struct StringLiteralExpr final : Expr {
-    // Декодированное значение без внешних кавычек.
     std::string value;
 };
 
@@ -140,25 +126,24 @@ struct IndexExpr final : Expr {
 };
 
 struct EmptyStmt final : Stmt {};
-
 struct BlockStmt final : Stmt {
     std::vector<StmtPtr> statements;
 };
 
 struct LetStmt final : Stmt {
     std::string name;
-    TypePtr explicitType;   // nullptr, если тип выводится
+    TypePtr explicitType;
     ExprPtr initializer;
 };
 
 struct VarStmt final : Stmt {
     std::string name;
-    TypePtr explicitType;   // обязателен
+    TypePtr explicitType;
     ExprPtr initializer;
 };
 
 struct AssignStmt final : Stmt {
-    ExprPtr target;   // NameExpr / FieldExpr / IndexExpr
+    ExprPtr target;
     ExprPtr value;
 };
 
@@ -169,7 +154,7 @@ struct ExprStmt final : Stmt {
 struct IfStmt final : Stmt {
     ExprPtr condition;
     std::unique_ptr<BlockStmt> thenBlock;
-    StmtPtr elseBranch; // nullptr / BlockStmt / IfStmt
+    StmtPtr elseBranch;
 };
 
 struct WhileStmt final : Stmt {
@@ -179,9 +164,8 @@ struct WhileStmt final : Stmt {
 
 struct BreakStmt final : Stmt {};
 struct ContinueStmt final : Stmt {};
-
 struct ReturnStmt final : Stmt {
-    ExprPtr value; // nullptr для return;
+    ExprPtr value;
 };
 
 struct Param {
@@ -217,5 +201,4 @@ struct FunctionDecl final : Decl {
     TypePtr returnType;
     std::unique_ptr<BlockStmt> body;
 };
-
-} // namespace AST
+}

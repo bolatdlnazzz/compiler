@@ -71,6 +71,7 @@ preinstall: src/preinstall
 .PHONY : preinstall
 
 # The main recursive "clean" target.
+clean: CMakeFiles/build.dir/clean
 clean: CMakeFiles/run.dir/clean
 clean: CMakeFiles/debug.dir/clean
 clean: CMakeFiles/clean-all.dir/clean
@@ -91,6 +92,32 @@ src/preinstall:
 # Recursive "clean" directory target.
 src/clean: src/CMakeFiles/astra.dir/clean
 .PHONY : src/clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/build.dir
+
+# All Build rule for target.
+CMakeFiles/build.dir/all: src/CMakeFiles/astra.dir/all
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/build.dir/build.make CMakeFiles/build.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/build.dir/build.make CMakeFiles/build.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/dilya/VSCode/compiler/build/CMakeFiles --progress-num= "Built target build"
+.PHONY : CMakeFiles/build.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/build.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dilya/VSCode/compiler/build/CMakeFiles 7
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/build.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dilya/VSCode/compiler/build/CMakeFiles 0
+.PHONY : CMakeFiles/build.dir/rule
+
+# Convenience name for target.
+build: CMakeFiles/build.dir/rule
+.PHONY : build
+
+# clean rule for target.
+CMakeFiles/build.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/build.dir/build.make CMakeFiles/build.dir/clean
+.PHONY : CMakeFiles/build.dir/clean
 
 #=============================================================================
 # Target rules for target CMakeFiles/run.dir

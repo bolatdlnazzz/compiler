@@ -5,15 +5,11 @@
 #include <utility>
 
 namespace Semantic {
-
-// ─── Type ────────────────────────────────────────────────────────────────────
-
 Type Type::error()   { Type t; t.kind = Kind::Error;  t.name = "<error>";  return t; }
 Type Type::unit()    { Type t; t.kind = Kind::Unit;   t.name = "unit";     return t; }
 Type Type::boolean() { Type t; t.kind = Kind::Bool;   t.name = "bool";     return t; }
 Type Type::character() { Type t; t.kind = Kind::Char; t.name = "char"; return t; }
 Type Type::string()  { Type t; t.kind = Kind::String; t.name = "string";   return t; }
-
 Type Type::integer(std::string name, int bits, bool isUnsigned) {
     Type t;
     t.kind = isUnsigned ? Kind::UInt : Kind::Int;
@@ -57,11 +53,7 @@ bool Type::operator==(const Type& other) const {
 }
 
 std::string Type::toString() const { return name; }
-
-// ─── Analyzer ────────────────────────────────────────────────────────────────
-
 Analyzer::Analyzer(std::string fileName) : fileName_(std::move(fileName)) {}
-
 Analyzer::Scope* Analyzer::makeScope(Scope* parent, bool isNamespace, std::string qualifiedName) {
     auto scope = std::make_unique<Scope>();
     scope->parent = parent;
@@ -120,7 +112,6 @@ void Analyzer::addBuiltinFunction(std::string name, Type returnType, std::vector
     info->paramTypes = std::move(params);
     info->isBuiltin = true;
     info->builtinName = info->name;
-
     Symbol sym;
     sym.kind = SymbolKind::Function;
     sym.name = name;
@@ -130,14 +121,11 @@ void Analyzer::addBuiltinFunction(std::string name, Type returnType, std::vector
 }
 
 void Analyzer::installBuiltins() {
-    // print — принимает любой тип (проверяется отдельно через isPrintable)
-    // Эти имена доступны сразу, до анализа пользовательского кода.
     addBuiltinFunction("print", Type::unit());
     addBuiltinFunction("input", Type::string());
     addBuiltinFunction("exit",  Type::unit(), {Type::integer("int32", 32, false)});
     addBuiltinFunction("panic", Type::unit(), {Type::string()});
     addBuiltinFunction("assert", Type::unit(), {Type::boolean()});
-    // len проверяется отдельно: принимает string или массив фиксированного размера.
     addBuiltinFunction("len",   Type::integer("int32", 32, false));
 }
 
@@ -167,7 +155,7 @@ Analyzer::Symbol* Analyzer::lookupLexical(const std::string& name) {
     return nullptr;
 }
 
-Analyzer::Symbol* Analyzer::resolvePathFromScope(Scope& start, const std::vector<std::string>& path, const AST::Node& /*node*/) {
+Analyzer::Symbol* Analyzer::resolvePathFromScope(Scope& start, const std::vector<std::string>& path, const AST::Node& ) {
     Scope* s = &start;
     for (std::size_t i = 0; i < path.size(); ++i) {
         auto it = s->symbols.find(path[i]);
@@ -183,12 +171,8 @@ Analyzer::Symbol* Analyzer::resolvePathFromScope(Scope& start, const std::vector
 Analyzer::Symbol* Analyzer::resolvePath(const std::vector<std::string>& path, const AST::Node& node) {
     if (path.empty()) return nullptr;
     if (path.size() == 1) return lookupLexical(path[0]);
-
-    // Пробуем от корня
     Symbol* s = resolvePathFromScope(*rootScope_, path, node);
     if (s) return s;
-
-    // Пробуем от moduleScope
     if (moduleScope_) {
         s = resolvePathFromScope(*moduleScope_, path, node);
         if (s) return s;
@@ -196,16 +180,11 @@ Analyzer::Symbol* Analyzer::resolvePath(const std::vector<std::string>& path, co
     return nullptr;
 }
 
-// ─── First pass: register all top-level declarations ─────────────────────────
-
 bool Analyzer::analyze(AST::Module& module) {
     diagnostics_.clear();
     ownedScopes_.clear();
-
     rootScope_ = makeScope(nullptr, false, "");
     installBuiltins();
-
-    // Сначала находим область модуля, потом анализируем все объявления внутри неё.
     if (!module.namePath.empty()) {
         Scope* s = rootScope_;
         for (const auto& part : module.namePath) {
@@ -217,11 +196,7 @@ bool Analyzer::analyze(AST::Module& module) {
         moduleScope_ = rootScope_;
     }
     currentScope_ = moduleScope_;
-
-    // Первый проход — регистрируем все типы и функции
     for (auto& decl : module.decls) analyzeDecl(*decl);
-
-    // Точка входа обязательна по базовому ТЗ: main должен быть функцией и возвращать int.
     Symbol* mainSym = lookupLexical("main");
     if (!mainSym || mainSym->kind != SymbolKind::Function || !mainSym->function) {
         addDiagnostic(module, "программа должна содержать функцию main");
@@ -231,12 +206,10 @@ bool Analyzer::analyze(AST::Module& module) {
             addDiagnostic(*mainSym->function->decl, "функция main должна возвращать int32/int64");
         }
     }
-
     return diagnostics_.empty();
 }
 
 void Analyzer::analyzeDecl(AST::Decl& decl) {
-    // На первом проходе регистрируем только структуру программы, без входа в тела.
     if (auto* ns = dynamic_cast<AST::NamespaceDecl*>(&decl))      return analyzeNamespaceDecl(*ns);
     if (auto* ta = dynamic_cast<AST::TypeAliasDecl*>(&decl))      return analyzeTypeAliasDecl(*ta);
     if (auto* st = dynamic_cast<AST::StructDecl*>(&decl))         return analyzeStructDecl(*st);
@@ -282,38 +255,27 @@ void Analyzer::analyzeStructDecl(AST::StructDecl& decl) {
 
 void Analyzer::analyzeFunctionDecl(AST::FunctionDecl& decl) {
     const std::string qname = qualify(decl.name);
-
     auto info = std::make_shared<FunctionInfo>();
     info->name = decl.name;
     info->qualifiedName = qname;
     info->decl = &decl;
-
-    // Параметры
     for (auto& p : decl.params) {
         Type pt = resolveType(*p.type);
         info->paramTypes.push_back(pt);
     }
-
-    // Тип возврата
     if (decl.returnType) info->returnType = resolveType(*decl.returnType);
     else info->returnType = Type::unit();
-
     Symbol sym;
     sym.kind = SymbolKind::Function;
     sym.name = decl.name;
     sym.type = info->returnType;
     sym.function = info;
     declare(*currentScope_, sym, decl);
-
-    // Анализируем тело функции
     Scope* saved = currentScope_;
     Scope* fnScope = makeScope(currentScope_, false);
     currentScope_ = fnScope;
-
     Type savedReturn = currentReturnType_;
     currentReturnType_ = info->returnType;
-
-    // Объявляем параметры в области видимости функции
     for (std::size_t i = 0; i < decl.params.size(); ++i) {
         Symbol paramSym;
         paramSym.kind = SymbolKind::Variable;
@@ -322,14 +284,10 @@ void Analyzer::analyzeFunctionDecl(AST::FunctionDecl& decl) {
         paramSym.isMutable = false;
         declare(*currentScope_, paramSym, decl);
     }
-
     analyzeBlock(*decl.body, false);
-
     currentReturnType_ = savedReturn;
     currentScope_ = saved;
 }
-
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 Type Analyzer::resolveType(AST::TypeExpr& typeExpr) {
     if (auto* named = dynamic_cast<AST::NamedType*>(&typeExpr)) return resolveNamedType(*named);
@@ -343,7 +301,6 @@ Type Analyzer::resolveType(AST::TypeExpr& typeExpr) {
 
 Type Analyzer::resolveNamedType(AST::NamedType& typeExpr) {
     const std::string name = joinPath(typeExpr.path);
-    // Встроенные типы
     if (name == "int8")    return Type::integer("int8",  8,  false);
     if (name == "int16")   return Type::integer("int16", 16, false);
     if (name == "int32")   return Type::integer("int32", 32, false);
@@ -358,8 +315,6 @@ Type Analyzer::resolveNamedType(AST::NamedType& typeExpr) {
     if (name == "char")    return Type::character();
     if (name == "string")  return Type::string();
     if (name == "unit")    return Type::unit();
-
-    // Пользовательские типы
     Symbol* sym = resolvePath(typeExpr.path, typeExpr);
     if (!sym) {
         addDiagnostic(typeExpr, "неизвестный тип '" + name + "'");
@@ -370,8 +325,6 @@ Type Analyzer::resolveNamedType(AST::NamedType& typeExpr) {
     addDiagnostic(typeExpr, "'" + name + "' не является типом");
     return Type::error();
 }
-
-// ─── Statements ──────────────────────────────────────────────────────────────
 
 Analyzer::Flow Analyzer::analyzeBlock(AST::BlockStmt& block, bool createScope) {
     Scope* saved = currentScope_;
@@ -388,7 +341,6 @@ Analyzer::Flow Analyzer::analyzeBlock(AST::BlockStmt& block, bool createScope) {
 Analyzer::Flow Analyzer::analyzeStmt(AST::Stmt& stmt) {
     if (dynamic_cast<AST::EmptyStmt*>(&stmt)) return Flow::MayContinue;
     if (auto* b = dynamic_cast<AST::BlockStmt*>(&stmt)) return analyzeBlock(*b, true);
-
     if (auto* let = dynamic_cast<AST::LetStmt*>(&stmt)) {
         std::optional<Type> expected;
         if (let->explicitType) expected = resolveType(*let->explicitType);
@@ -405,7 +357,6 @@ Analyzer::Flow Analyzer::analyzeStmt(AST::Stmt& stmt) {
         declare(*currentScope_, sym, stmt);
         return Flow::MayContinue;
     }
-
     if (auto* var = dynamic_cast<AST::VarStmt*>(&stmt)) {
         Type declared = resolveType(*var->explicitType);
         Type init = analyzeExpr(*var->initializer, declared);
@@ -419,7 +370,6 @@ Analyzer::Flow Analyzer::analyzeStmt(AST::Stmt& stmt) {
         declare(*currentScope_, sym, stmt);
         return Flow::MayContinue;
     }
-
     if (auto* asg = dynamic_cast<AST::AssignStmt*>(&stmt)) {
         LValueInfo lv = analyzeLValue(*asg->target);
         if (!lv.isLValue)
@@ -431,12 +381,9 @@ Analyzer::Flow Analyzer::analyzeStmt(AST::Stmt& stmt) {
             checkAssignable(lv.type, rhs, *asg->value);
         return Flow::MayContinue;
     }
-
     if (auto* es = dynamic_cast<AST::ExprStmt*>(&stmt)) return analyzeExprStmt(*es);
-
     if (auto* ifs = dynamic_cast<AST::IfStmt*>(&stmt)) return analyzeIf(*ifs);
     if (auto* wh  = dynamic_cast<AST::WhileStmt*>(&stmt)) return analyzeWhile(*wh);
-
     if (dynamic_cast<AST::BreakStmt*>(&stmt)) {
         if (loopDepth_ == 0) addDiagnostic(stmt, "break вне цикла");
         return Flow::MayContinue;
@@ -445,7 +392,6 @@ Analyzer::Flow Analyzer::analyzeStmt(AST::Stmt& stmt) {
         if (loopDepth_ == 0) addDiagnostic(stmt, "continue вне цикла");
         return Flow::MayContinue;
     }
-
     if (auto* ret = dynamic_cast<AST::ReturnStmt*>(&stmt)) {
         if (ret->value) {
             Type vt = analyzeExpr(*ret->value, currentReturnType_);
@@ -457,7 +403,6 @@ Analyzer::Flow Analyzer::analyzeStmt(AST::Stmt& stmt) {
         }
         return Flow::NoContinue;
     }
-
     addDiagnostic(stmt, "неизвестный оператор");
     return Flow::MayContinue;
 }
@@ -490,18 +435,13 @@ Analyzer::Flow Analyzer::analyzeExprStmt(AST::ExprStmt& stmt) {
     return Flow::MayContinue;
 }
 
-// ─── Expressions ─────────────────────────────────────────────────────────────
-
 static void setType(AST::Expr& expr, const Type& t) {
     expr.semanticType = t.name;
 }
 
 Type Analyzer::analyzeExpr(AST::Expr& expr, const std::optional<Type>& expected) {
     Type result = Type::error();
-
-    // Дальше идём по виду выражения и проверяем его в подходящем контексте.
     if (dynamic_cast<AST::IntLiteralExpr*>(&expr)) {
-        // Тип по умолчанию int32, но если есть контекст — используем его
         if (expected && (expected->kind == Type::Kind::Int || expected->kind == Type::Kind::UInt))
             result = *expected;
         else
@@ -550,7 +490,6 @@ Type Analyzer::analyzeExpr(AST::Expr& expr, const std::optional<Type>& expected)
     else {
         addDiagnostic(expr, "неизвестное выражение");
     }
-
     setType(expr, result);
     return result;
 }
@@ -575,7 +514,6 @@ Type Analyzer::analyzeArrayLiteral(AST::ArrayLiteralExpr& expr, const std::optio
     std::optional<Type> elemExpected;
     if (expected && expected->kind == Type::Kind::Array && expected->elementType)
         elemExpected = *expected->elementType;
-
     Type firstElem = analyzeExpr(*expr.elements[0], elemExpected);
     for (std::size_t i = 1; i < expr.elements.size(); ++i) {
         Type t = analyzeExpr(*expr.elements[i], firstElem);
@@ -594,7 +532,6 @@ Type Analyzer::analyzeStructLiteral(AST::StructLiteralExpr& expr) {
         return Type::error();
     }
     const auto& info = *sym->structure;
-    // Проверяем поля
     for (auto& f : expr.fields) {
         auto it = info.fields.find(f.name);
         if (it == info.fields.end()) {
@@ -634,10 +571,7 @@ Type Analyzer::analyzeBinary(AST::BinaryExpr& expr) {
     Type left  = analyzeExpr(*expr.left);
     Type right = analyzeExpr(*expr.right);
     if (left.isError() || right.isError()) return Type::error();
-
     const auto& op = expr.op;
-
-    // Логические
     if (op == "&&" || op == "||") {
         if (left.kind != Type::Kind::Bool)
             addDiagnostic(*expr.left,  "оператор " + op + " требует bool, получен " + left.toString());
@@ -645,31 +579,22 @@ Type Analyzer::analyzeBinary(AST::BinaryExpr& expr) {
             addDiagnostic(*expr.right, "оператор " + op + " требует bool, получен " + right.toString());
         return Type::boolean();
     }
-
-    // Строковая конкатенация
     if (op == "+" && left.kind == Type::Kind::String) {
         if (right.kind != Type::Kind::String)
             addDiagnostic(expr, "оператор + для строк требует string справа, получен " + right.toString());
         return Type::string();
     }
-
-    // Строковое сравнение
     if ((op == "==" || op == "!=") && left.kind == Type::Kind::String) {
         if (right.kind != Type::Kind::String)
             addDiagnostic(expr, "нельзя сравнивать string с " + right.toString());
         return Type::boolean();
     }
-
-    // Сравнение агрегатов (==, != по ТЗ)
     if ((op == "==" || op == "!=") && (left.kind == Type::Kind::Array || left.kind == Type::Kind::Struct)) {
         if (left != right)
             addDiagnostic(expr, "нельзя сравнивать " + left.toString() + " с " + right.toString());
         return Type::boolean();
     }
-
-    // Арифметика и сравнения для чисел
     if (left.isNumeric() && right.isNumeric()) {
-        // Типы должны совпадать (нет неявного приведения)
         if (left != right)
             addDiagnostic(expr, "несовместимые типы для оператора " + op + ": " +
                           left.toString() + " и " + right.toString());
@@ -680,15 +605,10 @@ Type Analyzer::analyzeBinary(AST::BinaryExpr& expr) {
         addDiagnostic(expr, "оператор " + op + " не поддерживается для числовых типов");
         return Type::error();
     }
-
-    // Булево сравнение
     if ((op == "==" || op == "!=") && left.kind == Type::Kind::Bool && right.kind == Type::Kind::Bool)
         return Type::boolean();
-
-    // Символьное сравнение: char поддерживает только == и !=.
     if ((op == "==" || op == "!=") && left.kind == Type::Kind::Char && right.kind == Type::Kind::Char)
         return Type::boolean();
-
     addDiagnostic(expr, "оператор " + op + " не применим к типам " + left.toString() + " и " + right.toString());
     return Type::error();
 }
@@ -711,10 +631,7 @@ Type Analyzer::analyzeCall(AST::CallExpr& expr) {
         for (auto& a : expr.args) analyzeExpr(*a);
         return Type::error();
     }
-
     const std::string name = joinPath(calleeName->path);
-
-    // Специальный случай: print принимает любой printable тип
     if (calleeName->path.size() == 1 && name == "print") {
         if (expr.args.size() != 1) {
             addDiagnostic(expr, "print ожидает 1 аргумент");
@@ -726,8 +643,6 @@ Type Analyzer::analyzeCall(AST::CallExpr& expr) {
         setType(*expr.callee, Type::unit());
         return Type::unit();
     }
-
-    // assert(bool) — встроенная проверка условия с аварийным завершением.
     if (calleeName->path.size() == 1 && name == "assert") {
         if (expr.args.size() != 1) {
             addDiagnostic(expr, "assert ожидает 1 аргумент");
@@ -739,8 +654,6 @@ Type Analyzer::analyzeCall(AST::CallExpr& expr) {
         setType(*expr.callee, Type::unit());
         return Type::unit();
     }
-
-    // len(x) — строка или массив фиксированного размера.
     if (calleeName->path.size() == 1 && name == "len") {
         if (expr.args.size() != 1) {
             addDiagnostic(expr, "len ожидает 1 аргумент");
@@ -752,7 +665,6 @@ Type Analyzer::analyzeCall(AST::CallExpr& expr) {
         setType(*expr.callee, Type::integer("int32", 32, false));
         return Type::integer("int32", 32, false);
     }
-
     Symbol* sym = resolvePath(calleeName->path, expr);
     if (!sym || sym->kind != SymbolKind::Function || !sym->function) {
         addDiagnostic(expr, "'" + name + "' не является функцией");
@@ -760,10 +672,7 @@ Type Analyzer::analyzeCall(AST::CallExpr& expr) {
         return Type::error();
     }
     setType(*expr.callee, sym->type);
-
     const auto& fn = *sym->function;
-
-    // Для встроенных с переменным числом аргументов (len, exit, panic, input) — гибкая проверка
     if (!fn.isBuiltin || !fn.paramTypes.empty()) {
         if (expr.args.size() != fn.paramTypes.size()) {
             addDiagnostic(expr, "функция '" + name + "' ожидает " +
@@ -790,11 +699,8 @@ Type Analyzer::analyzeField(AST::FieldExpr& expr) {
         addDiagnostic(expr, "доступ к полю применим только к структурам, получен " + objType.toString());
         return Type::error();
     }
-    // Ищем структуру
     Symbol* sym = lookupLexical(objType.name);
-    // Также пробуем по parts
     if (!sym) {
-        // поиск в rootScope
         for (auto& [k, v] : rootScope_->symbols) {
             if (v.kind == SymbolKind::Struct && v.structure && v.structure->qualifiedName == objType.name) {
                 sym = &v;
@@ -856,21 +762,17 @@ Analyzer::LValueInfo Analyzer::analyzeLValue(AST::Expr& expr) {
         info.type = et;
         return info;
     }
-    // Анализируем выражение чтобы проставить типы, но это не l-value
     analyzeExpr(expr);
     return info;
 }
 
 bool Analyzer::checkAssignable(const Type& lhs, const Type& rhs, const AST::Node& node) {
     if (lhs == rhs) return true;
-    // int-литерал совместим с любым целочисленным типом
     if ((lhs.kind == Type::Kind::Int || lhs.kind == Type::Kind::UInt) &&
         (rhs.kind == Type::Kind::Int || rhs.kind == Type::Kind::UInt) &&
         rhs.name == "int32") {
-        // допускаем присваивание int32-литерала к любому int/uint
         return true;
     }
-    // float-литерал совместим с любым float
     if (lhs.kind == Type::Kind::Float && rhs.kind == Type::Kind::Float && rhs.name == "float64") {
         return true;
     }
@@ -905,11 +807,8 @@ bool Analyzer::isTerminatingCall(const AST::Expr& expr) const {
     return name->path[0] == "exit" || name->path[0] == "panic";
 }
 
-// ─── Formatting ──────────────────────────────────────────────────────────────
-
 std::string formatDiagnostic(const Diagnostic& d) {
     return d.file + ":" + std::to_string(d.pos.line) + ":" +
            std::to_string(d.pos.column) + ": error: " + d.message;
 }
-
-} // namespace Semantic
+}
