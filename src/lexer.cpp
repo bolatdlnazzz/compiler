@@ -9,8 +9,7 @@ using Token = Lexer::Token;
 using TokenType = Lexer::TokenType;
 using Position = Lexer::Position;
 
-Lexer::Lexer::Lexer(std::string_view src, std::string filename)
-    : source_(src), file_(std::move(filename)) {}
+Lexer::Lexer::Lexer(std::string_view src, std::string filename) : source_(src), file_(std::move(filename)) {}
 
 void Lexer::Lexer::reset() {
     index_ = 0;
