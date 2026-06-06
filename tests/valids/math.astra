@@ -1,0 +1,9 @@
+fn main() -> int32 {
+    let value: int32 = 2 + 3 * 4;
+    let grouped: int32 = (2 + 3) * 4;
+
+    print(value);
+    print(grouped);
+
+    return value;
+}

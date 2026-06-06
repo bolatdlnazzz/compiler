@@ -1,0 +1,9 @@
+fn main() -> int32 {
+    let name: string = "astra";
+
+    assert(len(name) == 5);
+
+    print(len(name));
+
+    return len(name);
+}

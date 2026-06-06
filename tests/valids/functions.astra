@@ -1,0 +1,15 @@
+fn add(a: int32, b: int32) -> int32 {
+    return a + b;
+}
+
+fn mul(a: int32, b: int32) -> int32 {
+    return a * b;
+}
+
+fn main() -> int32 {
+    let result: int32 = mul(add(2, 3), 4);
+
+    print(result);
+
+    return result;
+}

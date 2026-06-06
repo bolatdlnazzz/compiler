@@ -1,0 +1,4 @@
+fn main() -> int32 {
+    print("Hello, Astra");
+    return 0;
+}

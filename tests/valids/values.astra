@@ -1,0 +1,11 @@
+fn main() -> int32 {
+    let text: string = "test";
+    let letter: char = 'A';
+    let ok: bool = true;
+
+    print(text);
+    print(letter);
+    print(ok);
+
+    return 0;
+}

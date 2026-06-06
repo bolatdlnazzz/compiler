@@ -1,0 +1,12 @@
+fn main() -> int32 {
+    var values: [int32; 3] = [10, 20, 30];
+
+    print(len(values));
+    print(values[1]);
+
+    values[2] = values[0] + values[1];
+
+    print(values[2]);
+
+    return values[2];
+}

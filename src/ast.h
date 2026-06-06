@@ -1,7 +1,5 @@
 #pragma once
-
 #include "lexer.h"
-
 #include <cstdint>
 #include <memory>
 #include <optional>

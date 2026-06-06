@@ -1,0 +1,9 @@
+fn main() -> int32 {
+    // Simple line comment.
+    let x: int32 = 10;
+
+    // Another line comment.
+    print(x);
+
+    return x;
+}

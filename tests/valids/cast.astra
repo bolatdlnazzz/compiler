@@ -1,0 +1,10 @@
+fn main() -> int32 {
+    let a: int32 = 65;
+    let big: int64 = a as int64;
+    let value: float64 = a as float64;
+
+    print(big);
+    print(value);
+
+    return a;
+}

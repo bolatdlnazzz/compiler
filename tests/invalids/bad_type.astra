@@ -1,4 +1,4 @@
 fn main() -> int32 {
-    let x int32 = 42
+    let x: int32 = "text";
     return 0;
 }

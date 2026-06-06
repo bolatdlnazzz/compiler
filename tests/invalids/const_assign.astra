@@ -1,0 +1,7 @@
+fn main() -> int32 {
+    let x: int32 = 1;
+
+    x = 2;
+
+    return x;
+}

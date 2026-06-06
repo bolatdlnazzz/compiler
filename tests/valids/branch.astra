@@ -1,0 +1,11 @@
+fn main() -> int32 {
+    let x: int32 = 7;
+
+    if (x > 5 && true) {
+        print("big");
+        return 1;
+    } else {
+        print("small");
+        return 0;
+    }
+}

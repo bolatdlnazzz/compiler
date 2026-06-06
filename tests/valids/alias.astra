@@ -1,0 +1,9 @@
+type Score = int32;
+
+fn main() -> int32 {
+    let score: Score = 100;
+
+    print(score);
+
+    return score;
+}
