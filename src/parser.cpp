@@ -288,6 +288,11 @@ std::unique_ptr<AST::FunctionDecl> Parser::parseFunctionDecl() {
     auto node = std::make_unique<AST::FunctionDecl>();
     node->name = expectIdentifierLike("ожидалось имя функции");
     if (panicMode_) return node;
+    if (match(Lexer::TokenType::Operator, ".")) {
+        node->methodOf.push_back(node->name);
+        node->name = expectIdentifierLike("ожидалось имя метода после '.'");
+        if (panicMode_) return node;
+    }
     expect(Lexer::TokenType::Separator, "(", "ожидался '(' после имени функции");
     if (panicMode_) return node;
     if (!check(Lexer::TokenType::Separator, ")")) {
@@ -301,6 +306,10 @@ std::unique_ptr<AST::FunctionDecl> Parser::parseFunctionDecl() {
             if (panicMode_) break;
             param.type = parseTypeExpr();
             if (panicMode_) break;
+            if (match(Lexer::TokenType::Operator, "=")) {
+                param.defaultValue = parseExpression();
+                if (panicMode_) break;
+            }
             param.span = spanFrom(paramFirst, previous());
             node->params.push_back(std::move(param));
         } while (!panicMode_ && match(Lexer::TokenType::Separator, ","));
@@ -566,6 +575,22 @@ AST::ExprPtr Parser::parseExpression(int minPrec) {
         const int nextMinPrec = isLeftAssociative(opTok) ? prec + 1 : prec;
         auto right = parseExpression(nextMinPrec);
         if (panicMode_) return left;
+        if (opTok.type == Lexer::TokenType::Operator && opTok.lexeme == "|>") {
+            if (auto* callRight = dynamic_cast<AST::CallExpr*>(right.get())) {
+                callRight->args.insert(callRight->args.begin(), std::move(left));
+                callRight->argNames.insert(callRight->argNames.begin(), std::nullopt);
+                callRight->span = spanFrom(opTok, previous());
+                left = std::move(right);
+            } else {
+                auto call = std::make_unique<AST::CallExpr>();
+                call->callee = std::move(right);
+                call->args.push_back(std::move(left));
+                call->argNames.push_back(std::nullopt);
+                call->span = spanFrom(opTok, previous());
+                left = std::move(call);
+            }
+            continue;
+        }
         auto binary = std::make_unique<AST::BinaryExpr>();
         binary->op = opTok.lexeme;
         binary->left = std::move(left);
@@ -577,7 +602,7 @@ AST::ExprPtr Parser::parseExpression(int minPrec) {
 }
 
 AST::ExprPtr Parser::parseUnary() {
-    if (check(Lexer::TokenType::Operator, "-") || check(Lexer::TokenType::Operator, "!")) {
+    if (check(Lexer::TokenType::Operator, "-") || check(Lexer::TokenType::Operator, "!") || check(Lexer::TokenType::Operator, "~")) {
         const auto opTok = advance();
         auto node = std::make_unique<AST::UnaryExpr>();
         node->op = opTok.lexeme;
@@ -600,7 +625,14 @@ AST::ExprPtr Parser::parsePostfix() {
             if (!check(Lexer::TokenType::Separator, ")")) {
                 do {
                     if (panicMode_) break;
+                    std::optional<std::string> argName;
+                    if ((peek().type == Lexer::TokenType::Identifier || isNameLike(peek())) &&
+                        peek(1).type == Lexer::TokenType::Operator && peek(1).lexeme == "=") {
+                        argName = advance().lexeme;
+                        advance(); // '='
+                    }
                     call->args.push_back(parseExpression());
+                    call->argNames.push_back(std::move(argName));
                 } while (!panicMode_ && match(Lexer::TokenType::Separator, ","));
             }
             if (panicMode_) return call;
@@ -650,6 +682,22 @@ AST::ExprPtr Parser::parsePostfix() {
 
 AST::ExprPtr Parser::parsePrimary() {
     const auto first = peek();
+    if (check(Lexer::TokenType::Keyword, "if")) {
+        advance();
+        return parseIfExpr(first);
+    }
+    if (check(Lexer::TokenType::Keyword, "sizeof") || check(Lexer::TokenType::Identifier, "sizeof")) {
+        advance();
+        return parseSizeOfExpr(first);
+    }
+    if (check(Lexer::TokenType::Keyword, "typeid") || check(Lexer::TokenType::Identifier, "typeid")) {
+        advance();
+        return parseTypeIdExpr(first, false);
+    }
+    if (check(Lexer::TokenType::Keyword, "typeof") || check(Lexer::TokenType::Identifier, "typeof")) {
+        advance();
+        return parseTypeIdExpr(first, true);
+    }
     if (match(Lexer::TokenType::IntLiteral)) {
         auto e = std::make_unique<AST::IntLiteralExpr>();
         e->lexeme = previous().lexeme;
@@ -745,6 +793,58 @@ AST::ExprPtr Parser::parsePrimary() {
     return errorExpr;
 }
 
+AST::ExprPtr Parser::parseSizeOfExpr(const Lexer::Token& first) {
+    expect(Lexer::TokenType::Separator, "(", "ожидался '(' после sizeof");
+    auto node = std::make_unique<AST::SizeOfExpr>();
+    if (panicMode_) return node;
+    node->targetType = parseTypeExpr();
+    if (panicMode_) return node;
+    expect(Lexer::TokenType::Separator, ")", "ожидался ')' после аргумента sizeof");
+    panicMode_ = false;
+    node->span = spanFrom(first, previous());
+    return node;
+}
+
+AST::ExprPtr Parser::parseTypeIdExpr(const Lexer::Token& first, bool isTypeof) {
+    expect(Lexer::TokenType::Separator, "(", isTypeof ? "ожидался '(' после typeof" : "ожидался '(' после typeid");
+    auto node = std::make_unique<AST::TypeIdExpr>();
+    node->fromTypeofKeyword = isTypeof;
+    if (panicMode_) return node;
+    node->target = parseExpression();
+    if (panicMode_) return node;
+    expect(Lexer::TokenType::Separator, ")", isTypeof ? "ожидался ')' после аргумента typeof" : "ожидался ')' после аргумента typeid");
+    panicMode_ = false;
+    node->span = spanFrom(first, previous());
+    return node;
+}
+
+
+AST::ExprPtr Parser::parseIfExpr(const Lexer::Token& first) {
+    auto node = std::make_unique<AST::IfExpr>();
+    expect(Lexer::TokenType::Separator, "(", "ожидался '(' после if-выражения");
+    if (panicMode_) return node;
+    node->condition = parseExpression();
+    if (panicMode_) return node;
+    expect(Lexer::TokenType::Separator, ")", "ожидался ')' после условия if-выражения");
+    if (panicMode_) return node;
+    expect(Lexer::TokenType::Separator, "{", "ожидался '{' перед then-значением if-выражения");
+    if (panicMode_) return node;
+    node->thenValue = parseExpression();
+    if (panicMode_) return node;
+    expect(Lexer::TokenType::Separator, "}", "ожидался '}' после then-значения if-выражения");
+    if (panicMode_) return node;
+    expect(Lexer::TokenType::Keyword, "else", "if-выражение должно иметь else-ветку");
+    if (panicMode_) return node;
+    expect(Lexer::TokenType::Separator, "{", "ожидался '{' перед else-значением if-выражения");
+    if (panicMode_) return node;
+    node->elseValue = parseExpression();
+    if (panicMode_) return node;
+    expect(Lexer::TokenType::Separator, "}", "ожидался '}' после else-значения if-выражения");
+    panicMode_ = false;
+    node->span = spanFrom(first, previous());
+    return node;
+}
+
 bool Parser::isAssignable(const AST::Expr& expr) const {
     return dynamic_cast<const AST::NameExpr*>(&expr) != nullptr ||
            dynamic_cast<const AST::FieldExpr*>(&expr) != nullptr ||
@@ -752,14 +852,19 @@ bool Parser::isAssignable(const AST::Expr& expr) const {
 }
 
 int Parser::precedenceOf(const Lexer::Token& tok) const {
-    if (tok.type == Lexer::TokenType::Keyword && tok.lexeme == "as") return 7;
+    if (tok.type == Lexer::TokenType::Keyword && tok.lexeme == "as") return 10;
     if (tok.type != Lexer::TokenType::Operator) return 0;
-    if (tok.lexeme == "||") return 1;
-    if (tok.lexeme == "&&") return 2;
-    if (tok.lexeme == "==" || tok.lexeme == "!=") return 3;
-    if (tok.lexeme == "<" || tok.lexeme == "<=" || tok.lexeme == ">" || tok.lexeme == ">=") return 4;
-    if (tok.lexeme == "+" || tok.lexeme == "-") return 5;
-    if (tok.lexeme == "*" || tok.lexeme == "/" || tok.lexeme == "%") return 6;
+    if (tok.lexeme == "|>") return 1;
+    if (tok.lexeme == "||") return 2;
+    if (tok.lexeme == "&&") return 3;
+    if (tok.lexeme == "|") return 4;
+    if (tok.lexeme == "^") return 5;
+    if (tok.lexeme == "&") return 6;
+    if (tok.lexeme == "==" || tok.lexeme == "!=") return 7;
+    if (tok.lexeme == "<" || tok.lexeme == "<=" || tok.lexeme == ">" || tok.lexeme == ">=") return 8;
+    if (tok.lexeme == "<<" || tok.lexeme == ">>") return 9;
+    if (tok.lexeme == "+" || tok.lexeme == "-") return 10;
+    if (tok.lexeme == "*" || tok.lexeme == "/" || tok.lexeme == "%") return 11;
     return 0;
 }
 

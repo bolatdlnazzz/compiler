@@ -105,11 +105,37 @@ void Lexer::Lexer::skipComment() {
     }
 }
 
+void Lexer::Lexer::skipBlockComment() {
+    // Supports nested comments: /* outer /* inner */ outer */
+    int depth = 1;
+    advance(); // '/'
+    advance(); // '*'
+    while (!isAtEnd() && depth > 0) {
+        if (peek() == '/' && peekNext() == '*') {
+            advance();
+            advance();
+            ++depth;
+            continue;
+        }
+        if (peek() == '*' && peekNext() == '/') {
+            advance();
+            advance();
+            --depth;
+            continue;
+        }
+        advance();
+    }
+}
+
 void Lexer::Lexer::skipWhitespaceAndComments() {
     while (!isAtEnd()) {
         skipWhitespace();
         if (peek() == '/' && peekNext() == '/') {
             skipComment();
+            continue;
+        }
+        if (peek() == '/' && peekNext() == '*') {
+            skipBlockComment();
             continue;
         }
         break;
@@ -148,11 +174,17 @@ Token Lexer::Lexer::nextToken() {
             }
             return makeToken(TokenType::Operator, "!", startPos);
         case '<':
+            if (match('<')) {
+                return makeToken(TokenType::Operator, "<<", startPos);
+            }
             if (match('=')) {
                 return makeToken(TokenType::Operator, "<=", startPos);
             }
             return makeToken(TokenType::Operator, "<", startPos);
         case '>':
+            if (match('>')) {
+                return makeToken(TokenType::Operator, ">>", startPos);
+            }
             if (match('=')) {
                 return makeToken(TokenType::Operator, ">=", startPos);
             }
@@ -161,12 +193,15 @@ Token Lexer::Lexer::nextToken() {
             if (match('&')) {
                 return makeToken(TokenType::Operator, "&&", startPos);
             }
-            return errorToken("expected '&' after '&'", startPos);
+            return makeToken(TokenType::Operator, "&", startPos);
         case '|':
             if (match('|')) {
                 return makeToken(TokenType::Operator, "||", startPos);
             }
-            return errorToken("expected '|' after '|'", startPos);
+            if (match('>')) {
+                return makeToken(TokenType::Operator, "|>", startPos);
+            }
+            return makeToken(TokenType::Operator, "|", startPos);
         case '-':
             if (match('>')) {
                 return makeToken(TokenType::Separator, "->", startPos);
@@ -187,6 +222,8 @@ Token Lexer::Lexer::nextToken() {
         case '/':
         case '%':
         case '.':
+        case '^':
+        case '~':
             return makeToken(TokenType::Operator, std::string(1, c), startPos);
         default:
             break;
@@ -237,7 +274,8 @@ Token Lexer::Lexer::identifierOrKeyword(Position startPos) {
     static const std::unordered_set<std::string> keywords = {
         "module", "namespace", "type", "struct", "fn", "let", "var",
         "if", "else", "while", "break", "continue", "return",
-        "as", "unit", "print", "input", "exit", "panic", "assert"
+        "as", "unit", "print", "input", "exit", "panic", "assert",
+        "sizeof", "typeid", "typeof", "len"
     };
 
     if (keywords.contains(lexeme)) {

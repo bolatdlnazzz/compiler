@@ -42,7 +42,10 @@ void dumpExpr(const AST::Expr* e, std::ostream& out, int pad) {
     if (auto* x = dynamic_cast<const AST::UnaryExpr*>(e)) { dumpExprHeader(e,out,pad,"Unary " + x->op); dumpExpr(x->operand.get(),out,pad+2); return; }
     if (auto* x = dynamic_cast<const AST::BinaryExpr*>(e)) { dumpExprHeader(e,out,pad,"Binary " + x->op); dumpExpr(x->left.get(),out,pad+2); dumpExpr(x->right.get(),out,pad+2); return; }
     if (auto* x = dynamic_cast<const AST::CastExpr*>(e)) { dumpExprHeader(e,out,pad,"Cast"); out << ind(pad+2) << "to "; dumpType(x->targetType.get(), out); out << "\n"; dumpExpr(x->value.get(),out,pad+2); return; }
-    if (auto* x = dynamic_cast<const AST::CallExpr*>(e)) { dumpExprHeader(e,out,pad,"Call"); dumpExpr(x->callee.get(),out,pad+2); for (auto& a: x->args) dumpExpr(a.get(),out,pad+2); return; }
+    if (auto* x = dynamic_cast<const AST::SizeOfExpr*>(e)) { dumpExprHeader(e,out,pad,"SizeOf"); out << ind(pad+2) << "type "; dumpType(x->targetType.get(), out); out << "\n"; return; }
+    if (auto* x = dynamic_cast<const AST::TypeIdExpr*>(e)) { dumpExprHeader(e,out,pad,x->fromTypeofKeyword ? "TypeOf" : "TypeId"); dumpExpr(x->target.get(),out,pad+2); return; }
+    if (auto* x = dynamic_cast<const AST::IfExpr*>(e)) { dumpExprHeader(e,out,pad,"IfExpr"); dumpExpr(x->condition.get(),out,pad+2); dumpExpr(x->thenValue.get(),out,pad+2); dumpExpr(x->elseValue.get(),out,pad+2); return; }
+    if (auto* x = dynamic_cast<const AST::CallExpr*>(e)) { dumpExprHeader(e,out,pad,"Call"); dumpExpr(x->callee.get(),out,pad+2); for (std::size_t i=0;i<x->args.size();++i) { if (i < x->argNames.size() && x->argNames[i]) out << ind(pad+2) << "ArgName " << *x->argNames[i] << "\n"; dumpExpr(x->args[i].get(),out,pad+2); } return; }
     if (auto* x = dynamic_cast<const AST::FieldExpr*>(e)) { dumpExprHeader(e,out,pad,"Field ." + x->field); dumpExpr(x->object.get(),out,pad+2); return; }
     if (auto* x = dynamic_cast<const AST::IndexExpr*>(e)) { dumpExprHeader(e,out,pad,"Index"); dumpExpr(x->object.get(),out,pad+2); dumpExpr(x->index.get(),out,pad+2); return; }
     if (auto* x = dynamic_cast<const AST::ArrayLiteralExpr*>(e)) { dumpExprHeader(e,out,pad,"ArrayLiteral"); for (auto& a: x->elements) dumpExpr(a.get(),out,pad+2); return; }

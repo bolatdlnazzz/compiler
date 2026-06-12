@@ -58,6 +58,7 @@ private:
     Token charLiteral(Position startPos);
     void skipWhitespace();
     void skipComment();
+    void skipBlockComment();
     void skipWhitespaceAndComments();
     static bool isAlpha(char c);
     static bool isDigit(char c);

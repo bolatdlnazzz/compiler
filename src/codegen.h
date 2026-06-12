@@ -108,6 +108,7 @@ private:
     void emitWhile(AST::WhileStmt& stmt, FunctionContext& ctx);
     void emitExpr(AST::Expr& expr, FunctionContext& ctx);
     void emitCall(AST::CallExpr& expr, FunctionContext& ctx);
+    void emitIfExpr(AST::IfExpr& expr, FunctionContext& ctx);
     void emitBinary(AST::BinaryExpr& expr, FunctionContext& ctx);
     void emitFloatBinary(AST::BinaryExpr& expr, FunctionContext& ctx, const std::string& type);
     void emitLogicalAnd(AST::BinaryExpr& expr, FunctionContext& ctx);

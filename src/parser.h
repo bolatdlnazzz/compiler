@@ -77,6 +77,9 @@ private:
     AST::ExprPtr parseUnary();
     AST::ExprPtr parsePostfix();
     AST::ExprPtr parsePrimary();
+    AST::ExprPtr parseSizeOfExpr(const Lexer::Token& first);
+    AST::ExprPtr parseTypeIdExpr(const Lexer::Token& first, bool isTypeof);
+    AST::ExprPtr parseIfExpr(const Lexer::Token& first);
     bool isAssignable(const AST::Expr& expr) const;
     int precedenceOf(const Lexer::Token& tok) const;
     bool isLeftAssociative(const Lexer::Token& tok) const;

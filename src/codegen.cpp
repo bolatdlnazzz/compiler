@@ -242,8 +242,9 @@ void Generator::collectSymbolsInDecl(AST::Decl& decl) {
 }
 
 void Generator::collectFunctionLabel(const AST::FunctionDecl& fn) {
-    const std::string q = currentPrefix().empty() ? fn.name : currentPrefix() + "::" + fn.name;
-    functionFullNames_.push_back(q);
+    std::string sourceName = fn.methodOf.empty() ? fn.name : joinPath(fn.methodOf) + "::" + fn.name;
+    const std::string q = currentPrefix().empty() ? sourceName : currentPrefix() + "::" + sourceName;
+    functionFullNames_.push_back(fn.qualifiedNameForCodegen.empty() ? q : fn.qualifiedNameForCodegen);
 }
 
 void Generator::collectAlias(const AST::TypeAliasDecl& alias) {
@@ -411,8 +412,9 @@ void Generator::scanStmtForFrame(AST::Stmt& stmt, FunctionContext& ctx) {
 }
 
 void Generator::emitFunction(AST::FunctionDecl& fn) {
-    const std::string qualified = currentPrefix().empty() ? fn.name : currentPrefix() + "::" + fn.name;
-    const std::string label = asmSymbolForQualifiedName(qualified);
+    std::string sourceName = fn.methodOf.empty() ? fn.name : joinPath(fn.methodOf) + "::" + fn.name;
+    const std::string qualified = currentPrefix().empty() ? sourceName : currentPrefix() + "::" + sourceName;
+    const std::string label = asmSymbolForQualifiedName(fn.qualifiedNameForCodegen.empty() ? qualified : fn.qualifiedNameForCodegen);
     const int frameSize = computeFrameSize(fn);
     FunctionContext ctx(*this);
     ctx.returnLabel = freshLabel("return_");
@@ -570,6 +572,14 @@ void Generator::emitExpr(AST::Expr& expr, FunctionContext& ctx) {
         emit("    lea rax, [rel " + stringLabel(s->value) + "]");
         return;
     }
+    if (auto* sz = dynamic_cast<AST::SizeOfExpr*>(&expr)) {
+        emit("    mov rax, " + std::to_string(typeSize(typeExprToString(*sz->targetType))));
+        return;
+    }
+    if (auto* tid = dynamic_cast<AST::TypeIdExpr*>(&expr)) {
+        emit("    lea rax, [rel " + stringLabel(exprType(*tid->target)) + "]");
+        return;
+    }
     if (auto* name = dynamic_cast<AST::NameExpr*>(&expr)) {
         if (name->path.size() == 1) {
             if (const Local* local = ctx.findLocal(name->path[0])) {
@@ -601,12 +611,16 @@ void Generator::emitExpr(AST::Expr& expr, FunctionContext& ctx) {
             emit("    cmp rax, 0");
             emit("    sete al");
             emit("    movzx rax, al");
+        } else if (unary->op == "~") {
+            emit("    not rax");
+            emitNormalizeInteger(operandType);
         }
         return;
     }
     if (auto* bin = dynamic_cast<AST::BinaryExpr*>(&expr)) return emitBinary(*bin, ctx);
     if (auto* cast = dynamic_cast<AST::CastExpr*>(&expr)) return emitCast(*cast, ctx);
     if (auto* call = dynamic_cast<AST::CallExpr*>(&expr)) return emitCall(*call, ctx);
+    if (auto* ifExpr = dynamic_cast<AST::IfExpr*>(&expr)) return emitIfExpr(*ifExpr, ctx);
     if (dynamic_cast<AST::ArrayLiteralExpr*>(&expr) || dynamic_cast<AST::StructLiteralExpr*>(&expr)) {
         const int sz = std::max(8, alignTo(typeSize(type), 8));
         emit("    sub rsp, " + std::to_string(sz));
@@ -630,6 +644,43 @@ void Generator::emitExpr(AST::Expr& expr, FunctionContext& ctx) {
     }
     addDiagnostic(expr, "неизвестное выражение для codegen");
     emit("    xor rax, rax");
+}
+
+
+void Generator::emitIfExpr(AST::IfExpr& expr, FunctionContext& ctx) {
+    const std::string elseLabel = freshLabel("ifexpr_else_");
+    const std::string endLabel = freshLabel("ifexpr_end_");
+    const std::string resultType = exprType(expr);
+    emitExpr(*expr.condition, ctx);
+    emit("    cmp rax, 0");
+    emit("    je " + elseLabel);
+    emitExpr(*expr.thenValue, ctx);
+    if (isFloatType(resultType)) {
+        emit("    sub rsp, 8");
+        ctx.stackBytes += 8;
+        if (resultType == "float32") emit("    movss [rsp], xmm0");
+        else emit("    movsd [rsp], xmm0");
+    } else {
+        emitPush(ctx, "rax");
+    }
+    emit("    jmp " + endLabel);
+    emit(elseLabel + ":");
+    emitExpr(*expr.elseValue, ctx);
+    if (isFloatType(resultType)) {
+        if (resultType == "float32") emit("    movss [rsp], xmm0");
+        else emit("    movsd [rsp], xmm0");
+    } else {
+        emit("    mov [rsp], rax");
+    }
+    emit(endLabel + ":");
+    if (isFloatType(resultType)) {
+        if (resultType == "float32") emit("    movss xmm0, [rsp]");
+        else emit("    movsd xmm0, [rsp]");
+        emit("    add rsp, 8");
+        ctx.stackBytes -= 8;
+    } else {
+        emitPop(ctx, "rax");
+    }
 }
 
 void Generator::emitBinary(AST::BinaryExpr& expr, FunctionContext& ctx) {
@@ -775,6 +826,17 @@ void Generator::emitBinary(AST::BinaryExpr& expr, FunctionContext& ctx) {
     if (op == "+") emit("    add rax, rbx");
     else if (op == "-") emit("    sub rax, rbx");
     else if (op == "*") emit("    imul rax, rbx");
+    else if (op == "&") emit("    and rax, rbx");
+    else if (op == "|") emit("    or rax, rbx");
+    else if (op == "^") emit("    xor rax, rbx");
+    else if (op == "<<" || op == ">>") {
+        const int bits = std::max(8, typeSize(operandType) * 8);
+        emit("    mov rcx, rbx");
+        emit("    and cl, " + std::to_string(bits - 1));
+        if (op == "<<") emit("    shl rax, cl");
+        else if (isUnsignedIntType(operandType)) emit("    shr rax, cl");
+        else emit("    sar rax, cl");
+    }
     else if (op == "/" || op == "%") {
         const std::string okLabel = freshLabel("div_ok_");
         emit("    cmp rbx, 0");
@@ -914,13 +976,14 @@ void Generator::emitCast(AST::CastExpr& expr, FunctionContext& ctx) {
 
 void Generator::emitCall(AST::CallExpr& expr, FunctionContext& ctx) {
     auto* calleeName = dynamic_cast<AST::NameExpr*>(expr.callee.get());
-    if (!calleeName) {
-        addDiagnostic(expr, "codegen поддерживает вызов только по имени функции");
+    const bool hasResolvedCallee = expr.resolvedCalleeName.has_value();
+    if (!calleeName && !hasResolvedCallee) {
+        addDiagnostic(expr, "codegen поддерживает вызов только по имени функции или уже разрешённого метода");
         emit("    xor rax, rax");
         return;
     }
-    const std::string name = joinPath(calleeName->path);
-    if (calleeName->path.size() == 1 && name == "print") {
+    const std::string name = calleeName ? joinPath(calleeName->path) : *expr.resolvedCalleeName;
+    if (calleeName && calleeName->path.size() == 1 && name == "print") {
         if (expr.args.size() != 1) {
             addDiagnostic(expr, "print ожидает один аргумент");
             return;
@@ -942,11 +1005,11 @@ void Generator::emitCall(AST::CallExpr& expr, FunctionContext& ctx) {
         emit("    xor rax, rax");
         return;
     }
-    if (calleeName->path.size() == 1 && name == "input") {
+    if (calleeName && calleeName->path.size() == 1 && name == "input") {
         emitCallInstruction(ctx, "astra_input_string");
         return;
     }
-    if (calleeName->path.size() == 1 && name == "len") {
+    if (calleeName && calleeName->path.size() == 1 && name == "len") {
         if (expr.args.size() == 1) {
             const std::string argType = exprType(*expr.args[0]);
             if (auto arr = parseArrayType(argType); arr.valid) {
@@ -959,7 +1022,7 @@ void Generator::emitCall(AST::CallExpr& expr, FunctionContext& ctx) {
         }
         return;
     }
-    if (calleeName->path.size() == 1 && name == "assert") {
+    if (calleeName && calleeName->path.size() == 1 && name == "assert") {
         if (expr.args.size() == 1) {
             emitExpr(*expr.args[0], ctx);
             emit("    mov rdi, rax");
@@ -969,7 +1032,7 @@ void Generator::emitCall(AST::CallExpr& expr, FunctionContext& ctx) {
         emit("    xor rax, rax");
         return;
     }
-    if (calleeName->path.size() == 1 && name == "exit") {
+    if (calleeName && calleeName->path.size() == 1 && name == "exit") {
         if (expr.args.size() == 1) {
             emitExpr(*expr.args[0], ctx);
             emit("    mov rdi, rax");
@@ -977,7 +1040,7 @@ void Generator::emitCall(AST::CallExpr& expr, FunctionContext& ctx) {
         }
         return;
     }
-    if (calleeName->path.size() == 1 && name == "panic") {
+    if (calleeName && calleeName->path.size() == 1 && name == "panic") {
         if (expr.args.size() == 1) {
             emitExpr(*expr.args[0], ctx);
             emit("    mov rdi, rax");
@@ -1031,7 +1094,8 @@ void Generator::emitCall(AST::CallExpr& expr, FunctionContext& ctx) {
             emitPop(ctx, intArgRegs[arg.regIndex]);
         }
     }
-    emitCallInstruction(ctx, asmSymbolForPath(calleeName->path));
+    if (hasResolvedCallee) emitCallInstruction(ctx, asmSymbolForQualifiedName(*expr.resolvedCalleeName));
+    else emitCallInstruction(ctx, asmSymbolForPath(calleeName->path));
     if (aggregateTempBytes > 0) {
         emit("    add rsp, " + std::to_string(aggregateTempBytes));
         ctx.stackBytes -= aggregateTempBytes;
@@ -1242,8 +1306,8 @@ void Generator::emitCallAggregateDest(AST::Expr& callExprBase, const std::string
         return;
     }
     auto* calleeName = dynamic_cast<AST::NameExpr*>(callExpr->callee.get());
-    if (!calleeName) {
-        addDiagnostic(*callExpr, "codegen поддерживает вызов только по имени функции");
+    if (!calleeName && !callExpr->resolvedCalleeName) {
+        addDiagnostic(*callExpr, "codegen поддерживает вызов только по имени функции или уже разрешённого метода");
         return;
     }
     emitPush(ctx, "rdi");
@@ -1283,7 +1347,8 @@ void Generator::emitCallAggregateDest(AST::Expr& callExprBase, const std::string
         }
     }
     emitPop(ctx, "rdi");
-    emitCallInstruction(ctx, asmSymbolForPath(calleeName->path));
+    if (callExpr->resolvedCalleeName) emitCallInstruction(ctx, asmSymbolForQualifiedName(*callExpr->resolvedCalleeName));
+    else emitCallInstruction(ctx, asmSymbolForPath(calleeName->path));
 }
 
 std::string formatDiagnostic(const Diagnostic& diagnostic) {

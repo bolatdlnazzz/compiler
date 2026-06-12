@@ -1,6 +1,7 @@
 #include "semantic.h"
 
 #include <algorithm>
+#include <cctype>
 #include <sstream>
 #include <utility>
 
@@ -53,6 +54,106 @@ bool Type::operator==(const Type& other) const {
 }
 
 std::string Type::toString() const { return name; }
+
+
+namespace {
+AST::TypePtr cloneTypeExpr(const AST::TypeExpr& type) {
+    if (const auto* named = dynamic_cast<const AST::NamedType*>(&type)) {
+        auto n = std::make_unique<AST::NamedType>();
+        n->path = named->path;
+        n->span = named->span;
+        return n;
+    }
+    if (const auto* arr = dynamic_cast<const AST::ArrayType*>(&type)) {
+        auto a = std::make_unique<AST::ArrayType>();
+        a->elementType = cloneTypeExpr(*arr->elementType);
+        a->size = arr->size;
+        a->span = arr->span;
+        return a;
+    }
+    auto err = std::make_unique<AST::NamedType>();
+    err->path = {"<error>"};
+    err->span = type.span;
+    return err;
+}
+
+AST::ExprPtr cloneExpr(const AST::Expr& expr) {
+    AST::ExprPtr out;
+    if (const auto* x = dynamic_cast<const AST::IntLiteralExpr*>(&expr)) {
+        auto n = std::make_unique<AST::IntLiteralExpr>(); n->lexeme = x->lexeme; out = std::move(n);
+    } else if (const auto* x = dynamic_cast<const AST::FloatLiteralExpr*>(&expr)) {
+        auto n = std::make_unique<AST::FloatLiteralExpr>(); n->lexeme = x->lexeme; out = std::move(n);
+    } else if (const auto* x = dynamic_cast<const AST::BoolLiteralExpr*>(&expr)) {
+        auto n = std::make_unique<AST::BoolLiteralExpr>(); n->value = x->value; out = std::move(n);
+    } else if (const auto* x = dynamic_cast<const AST::CharLiteralExpr*>(&expr)) {
+        auto n = std::make_unique<AST::CharLiteralExpr>(); n->value = x->value; out = std::move(n);
+    } else if (const auto* x = dynamic_cast<const AST::StringLiteralExpr*>(&expr)) {
+        auto n = std::make_unique<AST::StringLiteralExpr>(); n->value = x->value; out = std::move(n);
+    } else if (const auto* x = dynamic_cast<const AST::NameExpr*>(&expr)) {
+        auto n = std::make_unique<AST::NameExpr>(); n->path = x->path; out = std::move(n);
+    } else if (const auto* x = dynamic_cast<const AST::UnaryExpr*>(&expr)) {
+        auto n = std::make_unique<AST::UnaryExpr>(); n->op = x->op; n->operand = cloneExpr(*x->operand); out = std::move(n);
+    } else if (const auto* x = dynamic_cast<const AST::BinaryExpr*>(&expr)) {
+        auto n = std::make_unique<AST::BinaryExpr>(); n->op = x->op; n->left = cloneExpr(*x->left); n->right = cloneExpr(*x->right); out = std::move(n);
+    } else if (const auto* x = dynamic_cast<const AST::CastExpr*>(&expr)) {
+        auto n = std::make_unique<AST::CastExpr>(); n->value = cloneExpr(*x->value); n->targetType = cloneTypeExpr(*x->targetType); out = std::move(n);
+    } else if (const auto* x = dynamic_cast<const AST::CallExpr*>(&expr)) {
+        auto n = std::make_unique<AST::CallExpr>(); n->callee = cloneExpr(*x->callee); n->argNames = x->argNames; for (auto& a : x->args) n->args.push_back(cloneExpr(*a)); out = std::move(n);
+    } else if (const auto* x = dynamic_cast<const AST::FieldExpr*>(&expr)) {
+        auto n = std::make_unique<AST::FieldExpr>(); n->object = cloneExpr(*x->object); n->field = x->field; out = std::move(n);
+    } else if (const auto* x = dynamic_cast<const AST::IndexExpr*>(&expr)) {
+        auto n = std::make_unique<AST::IndexExpr>(); n->object = cloneExpr(*x->object); n->index = cloneExpr(*x->index); out = std::move(n);
+    } else if (const auto* x = dynamic_cast<const AST::ArrayLiteralExpr*>(&expr)) {
+        auto n = std::make_unique<AST::ArrayLiteralExpr>(); for (auto& e : x->elements) n->elements.push_back(cloneExpr(*e)); out = std::move(n);
+    } else if (const auto* x = dynamic_cast<const AST::StructLiteralExpr*>(&expr)) {
+        auto n = std::make_unique<AST::StructLiteralExpr>(); n->typePath = x->typePath; for (auto& f : x->fields) { AST::StructFieldInit nf; nf.name = f.name; nf.value = cloneExpr(*f.value); nf.span = f.span; n->fields.push_back(std::move(nf)); } out = std::move(n);
+    } else if (const auto* x = dynamic_cast<const AST::SizeOfExpr*>(&expr)) {
+        auto n = std::make_unique<AST::SizeOfExpr>(); n->targetType = cloneTypeExpr(*x->targetType); out = std::move(n);
+    } else if (const auto* x = dynamic_cast<const AST::TypeIdExpr*>(&expr)) {
+        auto n = std::make_unique<AST::TypeIdExpr>(); n->target = cloneExpr(*x->target); n->fromTypeofKeyword = x->fromTypeofKeyword; out = std::move(n);
+    } else if (const auto* x = dynamic_cast<const AST::IfExpr*>(&expr)) {
+        auto n = std::make_unique<AST::IfExpr>(); n->condition = cloneExpr(*x->condition); n->thenValue = cloneExpr(*x->thenValue); n->elseValue = cloneExpr(*x->elseValue); out = std::move(n);
+    } else {
+        auto n = std::make_unique<AST::NameExpr>(); n->path = {"<error>"}; out = std::move(n);
+    }
+    out->span = expr.span;
+    out->semanticType = expr.semanticType;
+    return out;
+}
+
+
+AST::TypePtr typeToTypeExpr(const Type& type) {
+    if (type.kind == Type::Kind::Array && type.elementType) {
+        auto arr = std::make_unique<AST::ArrayType>();
+        arr->elementType = typeToTypeExpr(*type.elementType);
+        arr->size = type.arraySize;
+        return arr;
+    }
+    auto n = std::make_unique<AST::NamedType>();
+    if (type.name.find("::") != std::string::npos) {
+        std::size_t start = 0;
+        while (start < type.name.size()) {
+            std::size_t pos = type.name.find("::", start);
+            if (pos == std::string::npos) { n->path.push_back(type.name.substr(start)); break; }
+            n->path.push_back(type.name.substr(start, pos - start));
+            start = pos + 2;
+        }
+    } else {
+        n->path.push_back(type.name);
+    }
+    return n;
+}
+
+AST::ExprPtr wrapImplicitCast(AST::ExprPtr value, const Type& target) {
+    auto cast = std::make_unique<AST::CastExpr>();
+    cast->span = value->span;
+    cast->semanticType = target.name;
+    cast->targetType = typeToTypeExpr(target);
+    cast->value = std::move(value);
+    return cast;
+}
+}
+
 Analyzer::Analyzer(std::string fileName) : fileName_(std::move(fileName)) {}
 Analyzer::Scope* Analyzer::makeScope(Scope* parent, bool isNamespace, std::string qualifiedName) {
     auto scope = std::make_unique<Scope>();
@@ -96,6 +197,40 @@ std::string Analyzer::joinPath(const std::vector<std::string>& path) const {
     return r;
 }
 
+std::string Analyzer::mangleFunctionName(const std::string& qualifiedName, const std::vector<Type>& params) const {
+    if (qualifiedName == "main") return "main";
+    std::string out = qualifiedName;
+    out += "__";
+    if (params.empty()) out += "void";
+    for (std::size_t i = 0; i < params.size(); ++i) {
+        if (i) out += "_";
+        for (char c : params[i].toString()) {
+            if (std::isalnum(static_cast<unsigned char>(c))) out += c;
+            else out += '_';
+        }
+    }
+    return out;
+}
+
+Analyzer::Symbol* Analyzer::lookupMethod(const std::string& receiverType, const std::string& methodName) {
+    std::vector<std::string> candidates;
+    candidates.push_back(receiverType + "::" + methodName);
+    const std::size_t pos = receiverType.rfind("::");
+    if (pos != std::string::npos) candidates.push_back(receiverType.substr(pos + 2) + "::" + methodName);
+    for (const auto& candidate : candidates) {
+        if (Symbol* s = lookupLexical(candidate)) return s;
+        if (rootScope_) {
+            auto it = rootScope_->symbols.find(candidate);
+            if (it != rootScope_->symbols.end()) return &it->second;
+        }
+        if (moduleScope_) {
+            auto it = moduleScope_->symbols.find(candidate);
+            if (it != moduleScope_->symbols.end()) return &it->second;
+        }
+    }
+    return nullptr;
+}
+
 void Analyzer::addDiagnostic(const AST::Node& node, std::string message) {
     diagnostics_.push_back(Diagnostic{fileName_, node.span.begin, std::move(message)});
 }
@@ -132,10 +267,34 @@ void Analyzer::installBuiltins() {
 bool Analyzer::declare(Scope& scope, const Symbol& symbol, const AST::Node& node) {
     auto it = scope.symbols.find(symbol.name);
     if (it != scope.symbols.end()) {
+        if (it->second.kind == SymbolKind::Function && symbol.kind == SymbolKind::Function && symbol.function) {
+            auto& overloads = it->second.overloads;
+            if (overloads.empty() && it->second.function) overloads.push_back(it->second.function);
+            for (const auto& existing : overloads) {
+                if (existing && existing->paramTypes.size() == symbol.function->paramTypes.size()) {
+                    bool sameSignature = true;
+                    for (std::size_t i = 0; i < existing->paramTypes.size(); ++i) {
+                        if (existing->paramTypes[i] != symbol.function->paramTypes[i]) {
+                            sameSignature = false;
+                            break;
+                        }
+                    }
+                    if (sameSignature) {
+                        addDiagnostic(node, "перегрузка функции '" + symbol.name + "' с такой сигнатурой уже объявлена");
+                        return false;
+                    }
+                }
+            }
+            overloads.push_back(symbol.function);
+            return true;
+        }
         addDiagnostic(node, "'" + symbol.name + "' уже объявлен в этой области видимости");
         return false;
     }
     scope.symbols[symbol.name] = symbol;
+    if (symbol.kind == SymbolKind::Function && symbol.function) {
+        scope.symbols[symbol.name].overloads.push_back(symbol.function);
+    }
     return true;
 }
 
@@ -198,13 +357,20 @@ bool Analyzer::analyze(AST::Module& module) {
     currentScope_ = moduleScope_;
     for (auto& decl : module.decls) analyzeDecl(*decl);
     Symbol* mainSym = lookupLexical("main");
-    if (!mainSym || mainSym->kind != SymbolKind::Function || !mainSym->function) {
+    if (!mainSym || mainSym->kind != SymbolKind::Function || mainSym->overloads.empty()) {
         addDiagnostic(module, "программа должна содержать функцию main");
     } else {
-        const Type& ret = mainSym->function->returnType;
-        if (!(ret.kind == Type::Kind::Int && (ret.name == "int32" || ret.name == "int64" || ret.name == "int"))) {
-            addDiagnostic(*mainSym->function->decl, "функция main должна возвращать int32/int64");
+        bool okMain = false;
+        for (const auto& fn : mainSym->overloads) {
+            if (!fn || !fn->decl) continue;
+            const Type& ret = fn->returnType;
+            if (fn->paramTypes.empty() && ret.kind == Type::Kind::Int &&
+                (ret.name == "int32" || ret.name == "int64" || ret.name == "int")) {
+                okMain = true;
+                break;
+            }
         }
+        if (!okMain) addDiagnostic(*mainSym->overloads.front()->decl, "функция main должна иметь сигнатуру main() -> int32/int64");
     }
     return diagnostics_.empty();
 }
@@ -254,28 +420,65 @@ void Analyzer::analyzeStructDecl(AST::StructDecl& decl) {
 }
 
 void Analyzer::analyzeFunctionDecl(AST::FunctionDecl& decl) {
-    const std::string qname = qualify(decl.name);
+    const std::string sourceName = decl.methodOf.empty()
+        ? decl.name
+        : joinPath(decl.methodOf) + "::" + decl.name;
+    const std::string qname = qualify(sourceName);
     auto info = std::make_shared<FunctionInfo>();
-    info->name = decl.name;
+    info->name = sourceName;
     info->qualifiedName = qname;
     info->decl = &decl;
+
+    bool sawDefault = false;
     for (auto& p : decl.params) {
         Type pt = resolveType(*p.type);
+        info->paramNames.push_back(p.name);
         info->paramTypes.push_back(pt);
+        info->defaultArgs.push_back(p.defaultValue.get());
+        if (p.defaultValue) {
+            sawDefault = true;
+            Type dt = analyzeExpr(*p.defaultValue, pt);
+            if (!dt.isError() && !pt.isError()) checkAssignable(pt, dt, *p.defaultValue);
+        } else if (sawDefault) {
+            addDiagnostic(decl, "параметр без значения по умолчанию не может идти после параметра со значением по умолчанию");
+        }
     }
+
+    if (!decl.methodOf.empty()) {
+        if (decl.params.empty()) {
+            addDiagnostic(decl, "метод структуры должен иметь первый параметр self");
+        } else {
+            const std::string receiverName = joinPath(decl.methodOf);
+            Type receiver = resolveType(*decl.params[0].type);
+            if (!receiver.isError() && receiver.name != receiverName && receiver.name != qualify(receiverName)) {
+                addDiagnostic(decl, "первый параметр метода должен иметь тип " + receiverName);
+            }
+        }
+    }
+
     if (decl.returnType) info->returnType = resolveType(*decl.returnType);
-    else info->returnType = Type::unit();
+    else info->returnType = Type::error();
+    info->codegenName = mangleFunctionName(qname, info->paramTypes);
+    if (qname == "main") info->codegenName = "main";
+    decl.qualifiedNameForCodegen = info->codegenName;
+
     Symbol sym;
     sym.kind = SymbolKind::Function;
-    sym.name = decl.name;
+    sym.name = sourceName;
     sym.type = info->returnType;
     sym.function = info;
     declare(*currentScope_, sym, decl);
+
     Scope* saved = currentScope_;
     Scope* fnScope = makeScope(currentScope_, false);
     currentScope_ = fnScope;
     Type savedReturn = currentReturnType_;
+    bool savedInfers = currentFunctionInfersReturn_;
+    bool savedSawReturn = currentFunctionSawReturnValue_;
     currentReturnType_ = info->returnType;
+    currentFunctionInfersReturn_ = !decl.returnType;
+    currentFunctionSawReturnValue_ = false;
+
     for (std::size_t i = 0; i < decl.params.size(); ++i) {
         Symbol paramSym;
         paramSym.kind = SymbolKind::Variable;
@@ -285,7 +488,12 @@ void Analyzer::analyzeFunctionDecl(AST::FunctionDecl& decl) {
         declare(*currentScope_, paramSym, decl);
     }
     analyzeBlock(*decl.body, false);
+    if (!decl.returnType) {
+        info->returnType = currentFunctionSawReturnValue_ ? currentReturnType_ : Type::unit();
+    }
     currentReturnType_ = savedReturn;
+    currentFunctionInfersReturn_ = savedInfers;
+    currentFunctionSawReturnValue_ = savedSawReturn;
     currentScope_ = saved;
 }
 
@@ -394,12 +602,27 @@ Analyzer::Flow Analyzer::analyzeStmt(AST::Stmt& stmt) {
     }
     if (auto* ret = dynamic_cast<AST::ReturnStmt*>(&stmt)) {
         if (ret->value) {
-            Type vt = analyzeExpr(*ret->value, currentReturnType_);
-            if (!currentReturnType_.isError() && !vt.isError())
-                checkAssignable(currentReturnType_, vt, *ret->value);
+            if (currentFunctionInfersReturn_) {
+                Type vt = analyzeExpr(*ret->value);
+                if (!vt.isError()) {
+                    if (!currentFunctionSawReturnValue_) {
+                        currentReturnType_ = vt;
+                        currentFunctionSawReturnValue_ = true;
+                    } else {
+                        checkAssignable(currentReturnType_, vt, *ret->value);
+                    }
+                }
+            } else {
+                Type vt = analyzeExpr(*ret->value, currentReturnType_);
+                if (!currentReturnType_.isError() && !vt.isError())
+                    checkAssignable(currentReturnType_, vt, *ret->value);
+            }
         } else {
-            if (currentReturnType_.kind != Type::Kind::Unit)
+            if (currentFunctionInfersReturn_) {
+                if (!currentFunctionSawReturnValue_) currentReturnType_ = Type::unit();
+            } else if (currentReturnType_.kind != Type::Kind::Unit) {
                 addDiagnostic(stmt, "функция должна вернуть значение типа " + currentReturnType_.toString());
+            }
         }
         return Flow::NoContinue;
     }
@@ -477,6 +700,15 @@ Type Analyzer::analyzeExpr(AST::Expr& expr, const std::optional<Type>& expected)
     }
     else if (auto* e = dynamic_cast<AST::CastExpr*>(&expr)) {
         result = analyzeCast(*e);
+    }
+    else if (auto* e = dynamic_cast<AST::SizeOfExpr*>(&expr)) {
+        result = analyzeSizeOf(*e);
+    }
+    else if (auto* e = dynamic_cast<AST::TypeIdExpr*>(&expr)) {
+        result = analyzeTypeId(*e);
+    }
+    else if (auto* e = dynamic_cast<AST::IfExpr*>(&expr)) {
+        result = analyzeIfExpr(*e, expected);
     }
     else if (auto* e = dynamic_cast<AST::CallExpr*>(&expr)) {
         result = analyzeCall(*e);
@@ -563,6 +795,13 @@ Type Analyzer::analyzeUnary(AST::UnaryExpr& expr) {
         }
         return Type::boolean();
     }
+    if (expr.op == "~") {
+        if (!operand.isInteger()) {
+            addDiagnostic(expr, "битовое отрицание применимо только к целым типам, получен " + operand.toString());
+            return Type::error();
+        }
+        return operand;
+    }
     addDiagnostic(expr, "неизвестный унарный оператор '" + expr.op + "'");
     return Type::error();
 }
@@ -594,6 +833,16 @@ Type Analyzer::analyzeBinary(AST::BinaryExpr& expr) {
             addDiagnostic(expr, "нельзя сравнивать " + left.toString() + " с " + right.toString());
         return Type::boolean();
     }
+    if (op == "&" || op == "|" || op == "^" || op == "<<" || op == ">>") {
+        if (!left.isInteger() || !right.isInteger()) {
+            addDiagnostic(expr, "битовый оператор " + op + " требует целочисленные операнды, получены " + left.toString() + " и " + right.toString());
+            return Type::error();
+        }
+        if (op != "<<" && op != ">>" && left != right) {
+            addDiagnostic(expr, "битовый оператор " + op + " требует одинаковые типы, получены " + left.toString() + " и " + right.toString());
+        }
+        return left;
+    }
     if (left.isNumeric() && right.isNumeric()) {
         if (left != right)
             addDiagnostic(expr, "несовместимые типы для оператора " + op + ": " +
@@ -624,72 +873,215 @@ Type Analyzer::analyzeCast(AST::CastExpr& expr) {
     return to;
 }
 
+Type Analyzer::analyzeSizeOf(AST::SizeOfExpr& expr) {
+    Type t = resolveType(*expr.targetType);
+    (void)t;
+    return Type::integer("int32", 32, false);
+}
+
+Type Analyzer::analyzeTypeId(AST::TypeIdExpr& expr) {
+    Type t = analyzeExpr(*expr.target);
+    (void)t;
+    return Type::string();
+}
+
+
+Type Analyzer::analyzeIfExpr(AST::IfExpr& expr, const std::optional<Type>& expected) {
+    Type cond = analyzeExpr(*expr.condition, Type::boolean());
+    if (!cond.isError() && cond.kind != Type::Kind::Bool) {
+        addDiagnostic(*expr.condition, "условие if-выражения должно иметь тип bool");
+    }
+    Type thenType = analyzeExpr(*expr.thenValue, expected);
+    Type elseType = analyzeExpr(*expr.elseValue, expected ? expected : std::optional<Type>(thenType));
+    if (thenType.isError() || elseType.isError()) return Type::error();
+    if (thenType == elseType) return thenType;
+    if (canAssignSilently(thenType, elseType)) {
+        expr.elseValue = wrapImplicitCast(std::move(expr.elseValue), thenType);
+        return thenType;
+    }
+    if (canAssignSilently(elseType, thenType)) {
+        expr.thenValue = wrapImplicitCast(std::move(expr.thenValue), elseType);
+        return elseType;
+    }
+    addDiagnostic(expr, "ветки if-выражения имеют несовместимые типы: " + thenType.toString() + " и " + elseType.toString());
+    return Type::error();
+}
+
 Type Analyzer::analyzeCall(AST::CallExpr& expr) {
-    auto* calleeName = dynamic_cast<AST::NameExpr*>(expr.callee.get());
-    if (!calleeName) {
-        addDiagnostic(expr, "вызов только по имени функции");
-        for (auto& a : expr.args) analyzeExpr(*a);
-        return Type::error();
-    }
-    const std::string name = joinPath(calleeName->path);
-    if (calleeName->path.size() == 1 && name == "print") {
-        if (expr.args.size() != 1) {
-            addDiagnostic(expr, "print ожидает 1 аргумент");
-        } else {
-            Type argType = analyzeExpr(*expr.args[0]);
-            if (!argType.isError() && !isPrintable(argType))
-                addDiagnostic(*expr.args[0], "тип " + argType.toString() + " не поддерживается функцией print");
+    auto analyzeBuiltin = [&](const std::string& name) -> std::optional<Type> {
+        if (name == "print") {
+            if (expr.args.size() != 1) {
+                addDiagnostic(expr, "print ожидает 1 аргумент");
+            } else {
+                Type argType = analyzeExpr(*expr.args[0]);
+                if (!argType.isError() && !isPrintable(argType))
+                    addDiagnostic(*expr.args[0], "тип " + argType.toString() + " не поддерживается функцией print");
+            }
+            setType(*expr.callee, Type::unit());
+            return Type::unit();
         }
-        setType(*expr.callee, Type::unit());
-        return Type::unit();
-    }
-    if (calleeName->path.size() == 1 && name == "assert") {
-        if (expr.args.size() != 1) {
-            addDiagnostic(expr, "assert ожидает 1 аргумент");
-        } else {
-            Type argType = analyzeExpr(*expr.args[0], Type::boolean());
-            if (!argType.isError() && argType.kind != Type::Kind::Bool)
-                addDiagnostic(*expr.args[0], "assert ожидает bool, получен " + argType.toString());
+        if (name == "assert") {
+            if (expr.args.size() != 1) {
+                addDiagnostic(expr, "assert ожидает 1 аргумент");
+            } else {
+                Type argType = analyzeExpr(*expr.args[0], Type::boolean());
+                if (!argType.isError() && argType.kind != Type::Kind::Bool)
+                    addDiagnostic(*expr.args[0], "assert ожидает bool, получен " + argType.toString());
+            }
+            setType(*expr.callee, Type::unit());
+            return Type::unit();
         }
-        setType(*expr.callee, Type::unit());
-        return Type::unit();
-    }
-    if (calleeName->path.size() == 1 && name == "len") {
-        if (expr.args.size() != 1) {
-            addDiagnostic(expr, "len ожидает 1 аргумент");
-        } else {
-            Type argType = analyzeExpr(*expr.args[0]);
-            if (!argType.isError() && argType.kind != Type::Kind::String && argType.kind != Type::Kind::Array)
-                addDiagnostic(*expr.args[0], "len ожидает string или массив, получен " + argType.toString());
+        if (name == "len") {
+            if (expr.args.size() != 1) {
+                addDiagnostic(expr, "len ожидает 1 аргумент");
+            } else {
+                Type argType = analyzeExpr(*expr.args[0]);
+                if (!argType.isError() && argType.kind != Type::Kind::String && argType.kind != Type::Kind::Array)
+                    addDiagnostic(*expr.args[0], "len ожидает string или массив, получен " + argType.toString());
+            }
+            setType(*expr.callee, Type::integer("int32", 32, false));
+            return Type::integer("int32", 32, false);
         }
-        setType(*expr.callee, Type::integer("int32", 32, false));
-        return Type::integer("int32", 32, false);
-    }
-    Symbol* sym = resolvePath(calleeName->path, expr);
-    if (!sym || sym->kind != SymbolKind::Function || !sym->function) {
-        addDiagnostic(expr, "'" + name + "' не является функцией");
-        for (auto& a : expr.args) analyzeExpr(*a);
-        return Type::error();
-    }
-    setType(*expr.callee, sym->type);
-    const auto& fn = *sym->function;
-    if (!fn.isBuiltin || !fn.paramTypes.empty()) {
-        if (expr.args.size() != fn.paramTypes.size()) {
-            addDiagnostic(expr, "функция '" + name + "' ожидает " +
-                          std::to_string(fn.paramTypes.size()) + " аргументов, получено " +
-                          std::to_string(expr.args.size()));
+        if (name == "input") {
+            if (!expr.args.empty()) addDiagnostic(expr, "input не принимает аргументы");
+            return Type::string();
         }
-        for (std::size_t i = 0; i < expr.args.size(); ++i) {
-            std::optional<Type> expected;
-            if (i < fn.paramTypes.size()) expected = fn.paramTypes[i];
-            Type at = analyzeExpr(*expr.args[i], expected);
-            if (expected && !expected->isError() && !at.isError())
-                checkAssignable(*expected, at, *expr.args[i]);
+        if (name == "exit") {
+            if (expr.args.size() != 1) addDiagnostic(expr, "exit ожидает 1 аргумент");
+            else analyzeExpr(*expr.args[0], Type::integer("int32", 32, false));
+            return Type::unit();
+        }
+        if (name == "panic") {
+            if (expr.args.size() != 1) addDiagnostic(expr, "panic ожидает 1 аргумент");
+            else analyzeExpr(*expr.args[0], Type::string());
+            return Type::unit();
+        }
+        return std::nullopt;
+    };
+
+    Symbol* sym = nullptr;
+    std::string displayName;
+
+    if (auto* calleeName = dynamic_cast<AST::NameExpr*>(expr.callee.get())) {
+        displayName = joinPath(calleeName->path);
+        if (calleeName->path.size() == 1) {
+            if (auto builtin = analyzeBuiltin(displayName)) return *builtin;
+        }
+        sym = resolvePath(calleeName->path, expr);
+    } else if (auto* method = dynamic_cast<AST::FieldExpr*>(expr.callee.get())) {
+        Type receiverType = analyzeExpr(*method->object);
+        displayName = receiverType.toString() + "." + method->field;
+        if (!receiverType.isError() && receiverType.kind == Type::Kind::Struct) {
+            sym = lookupMethod(receiverType.name, method->field);
+            if (sym && sym->kind == SymbolKind::Function) {
+                expr.args.insert(expr.args.begin(), std::move(method->object));
+                expr.argNames.insert(expr.argNames.begin(), std::nullopt);
+            }
         }
     } else {
+        addDiagnostic(expr, "вызов только по имени функции или метода структуры");
         for (auto& a : expr.args) analyzeExpr(*a);
+        return Type::error();
     }
-    return fn.returnType;
+
+    if (!sym || sym->kind != SymbolKind::Function || sym->overloads.empty()) {
+        addDiagnostic(expr, "'" + displayName + "' не является функцией");
+        for (auto& a : expr.args) if (a) analyzeExpr(*a);
+        return Type::error();
+    }
+
+    std::vector<Type> providedTypes;
+    providedTypes.reserve(expr.args.size());
+    for (auto& a : expr.args) providedTypes.push_back(analyzeExpr(*a));
+
+    auto candidateScore = [&](const FunctionInfo& fn) -> std::optional<int> {
+        std::vector<bool> filled(fn.paramTypes.size(), false);
+        std::size_t nextPos = 0;
+        int score = 0;
+        for (std::size_t i = 0; i < expr.args.size(); ++i) {
+            int target = -1;
+            if (i < expr.argNames.size() && expr.argNames[i]) {
+                for (std::size_t p = 0; p < fn.paramNames.size(); ++p) {
+                    if (fn.paramNames[p] == *expr.argNames[i]) { target = static_cast<int>(p); break; }
+                }
+                if (target < 0) return std::nullopt;
+            } else {
+                while (nextPos < filled.size() && filled[nextPos]) ++nextPos;
+                if (nextPos >= fn.paramTypes.size()) return std::nullopt;
+                target = static_cast<int>(nextPos++);
+            }
+            if (filled[target]) return std::nullopt;
+            filled[target] = true;
+            if (!providedTypes[i].isError()) {
+                int s = implicitConversionScore(fn.paramTypes[target], providedTypes[i]);
+                if (s < 0) return std::nullopt;
+                score += s;
+            }
+        }
+        for (std::size_t p = 0; p < filled.size(); ++p) {
+            if (!filled[p] && (p >= fn.defaultArgs.size() || fn.defaultArgs[p] == nullptr)) return std::nullopt;
+        }
+        return score;
+    };
+
+    std::shared_ptr<FunctionInfo> selected;
+    std::optional<int> bestScore;
+    bool ambiguous = false;
+    for (auto& fn : sym->overloads) {
+        if (!fn) continue;
+        auto score = candidateScore(*fn);
+        if (!score) continue;
+        if (!selected || *score < *bestScore) {
+            selected = fn;
+            bestScore = score;
+            ambiguous = false;
+        } else if (*score == *bestScore) {
+            ambiguous = true;
+        }
+    }
+    if (ambiguous) {
+        addDiagnostic(expr, "неоднозначный вызов перегруженной функции '" + displayName + "'");
+        return Type::error();
+    }
+    if (!selected) {
+        addDiagnostic(expr, "нет подходящей перегрузки функции '" + displayName + "' для переданных аргументов");
+        return Type::error();
+    }
+
+    // Normalize named/default arguments into plain positional arguments for codegen.
+    std::vector<AST::ExprPtr> normalized(selected->paramTypes.size());
+    std::size_t nextPos = 0;
+    for (std::size_t i = 0; i < expr.args.size(); ++i) {
+        std::size_t target = 0;
+        if (i < expr.argNames.size() && expr.argNames[i]) {
+            auto it = std::find(selected->paramNames.begin(), selected->paramNames.end(), *expr.argNames[i]);
+            target = static_cast<std::size_t>(std::distance(selected->paramNames.begin(), it));
+        } else {
+            while (nextPos < normalized.size() && normalized[nextPos]) ++nextPos;
+            target = nextPos++;
+        }
+        if (target < normalized.size()) normalized[target] = std::move(expr.args[i]);
+    }
+    for (std::size_t i = 0; i < normalized.size(); ++i) {
+        if (!normalized[i] && i < selected->defaultArgs.size() && selected->defaultArgs[i]) {
+            normalized[i] = cloneExpr(*selected->defaultArgs[i]);
+            Type dt = analyzeExpr(*normalized[i], selected->paramTypes[i]);
+            if (!dt.isError()) checkAssignable(selected->paramTypes[i], dt, *normalized[i]);
+        }
+    }
+    expr.args = std::move(normalized);
+    expr.argNames.clear();
+
+    for (std::size_t i = 0; i < expr.args.size(); ++i) {
+        Type at = analyzeExpr(*expr.args[i], selected->paramTypes[i]);
+        if (!at.isError() && checkAssignable(selected->paramTypes[i], at, *expr.args[i]) && at != selected->paramTypes[i]) {
+            expr.args[i] = wrapImplicitCast(std::move(expr.args[i]), selected->paramTypes[i]);
+        }
+    }
+
+    expr.resolvedCalleeName = selected->codegenName.empty() ? selected->qualifiedName : selected->codegenName;
+    if (expr.callee) setType(*expr.callee, selected->returnType);
+    return selected->returnType;
 }
 
 Type Analyzer::analyzeField(AST::FieldExpr& expr) {
@@ -764,6 +1156,25 @@ Analyzer::LValueInfo Analyzer::analyzeLValue(AST::Expr& expr) {
     }
     analyzeExpr(expr);
     return info;
+}
+
+
+int Analyzer::implicitConversionScore(const Type& lhs, const Type& rhs) const {
+    if (lhs == rhs) return 0;
+    if ((lhs.kind == Type::Kind::Int || lhs.kind == Type::Kind::UInt) &&
+        (rhs.kind == Type::Kind::Int || rhs.kind == Type::Kind::UInt) &&
+        rhs.name == "int32") return 1;
+    if (lhs.kind == Type::Kind::Float && rhs.kind == Type::Kind::Float && rhs.name == "float64") return 1;
+    return -1;
+}
+
+bool Analyzer::canAssignSilently(const Type& lhs, const Type& rhs) const {
+    if (lhs == rhs) return true;
+    if ((lhs.kind == Type::Kind::Int || lhs.kind == Type::Kind::UInt) &&
+        (rhs.kind == Type::Kind::Int || rhs.kind == Type::Kind::UInt) &&
+        rhs.name == "int32") return true;
+    if (lhs.kind == Type::Kind::Float && rhs.kind == Type::Kind::Float && rhs.name == "float64") return true;
+    return false;
 }
 
 bool Analyzer::checkAssignable(const Type& lhs, const Type& rhs, const AST::Node& node) {

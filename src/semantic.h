@@ -69,6 +69,7 @@ private:
         Type type = Type::error();
         bool isMutable = false;
         std::shared_ptr<FunctionInfo> function;
+        std::vector<std::shared_ptr<FunctionInfo>> overloads;
         std::shared_ptr<StructInfo> structure;
         Scope* namespaceScope = nullptr;
     };
@@ -81,11 +82,14 @@ private:
     struct FunctionInfo {
         std::string name;
         std::string qualifiedName;
+        std::vector<std::string> paramNames;
         std::vector<Type> paramTypes;
+        std::vector<AST::Expr*> defaultArgs;
         Type returnType = Type::unit();
         AST::FunctionDecl* decl = nullptr;
         bool isBuiltin = false;
         std::string builtinName;
+        std::string codegenName;
     };
     struct StructInfo {
         std::string name;
@@ -107,6 +111,8 @@ private:
     Scope* currentScope_ = nullptr;
     std::vector<std::string> namespaceStack_;
     Type currentReturnType_ = Type::unit();
+    bool currentFunctionInfersReturn_ = false;
+    bool currentFunctionSawReturnValue_ = false;
     int loopDepth_ = 0;
     Scope* makeScope(Scope* parent, bool isNamespace, std::string qualifiedName = {});
     Scope* ensureNamespace(Scope& scope, const std::string& name, const AST::Node& node);
@@ -141,12 +147,19 @@ private:
     Type analyzeUnary(AST::UnaryExpr& expr);
     Type analyzeBinary(AST::BinaryExpr& expr);
     Type analyzeCast(AST::CastExpr& expr);
+    Type analyzeSizeOf(AST::SizeOfExpr& expr);
+    Type analyzeTypeId(AST::TypeIdExpr& expr);
+    Type analyzeIfExpr(AST::IfExpr& expr, const std::optional<Type>& expected);
     Type analyzeCall(AST::CallExpr& expr);
     Type analyzeField(AST::FieldExpr& expr);
     Type analyzeIndex(AST::IndexExpr& expr);
     LValueInfo analyzeLValue(AST::Expr& expr);
     bool checkAssignable(const Type& lhs, const Type& rhs, const AST::Node& node);
+    int implicitConversionScore(const Type& lhs, const Type& rhs) const;
+    bool canAssignSilently(const Type& lhs, const Type& rhs) const;
     bool canCast(const Type& from, const Type& to) const;
+    std::string mangleFunctionName(const std::string& qualifiedName, const std::vector<Type>& params) const;
+    Symbol* lookupMethod(const std::string& receiverType, const std::string& methodName);
     bool isPrintable(const Type& type) const;
     bool isTerminatingCall(const AST::Expr& expr) const;
 };

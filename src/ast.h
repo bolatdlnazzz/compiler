@@ -108,9 +108,30 @@ struct CastExpr final : Expr {
     TypePtr targetType;
 };
 
+struct SizeOfExpr final : Expr {
+    TypePtr targetType;
+};
+
+struct TypeIdExpr final : Expr {
+    ExprPtr target;
+    // typeid(expr) and typeof(expr) are compile-time meta expressions;
+    // both produce the canonical type name as a string literal at runtime.
+    bool fromTypeofKeyword = false;
+};
+
+struct IfExpr final : Expr {
+    ExprPtr condition;
+    ExprPtr thenValue;
+    ExprPtr elseValue;
+};
+
 struct CallExpr final : Expr {
     ExprPtr callee;
     std::vector<ExprPtr> args;
+    std::vector<std::optional<std::string>> argNames;
+    // Filled by semantic analysis. It allows codegen to call overloaded
+    // functions and methods after name resolution/mangling.
+    std::optional<std::string> resolvedCalleeName;
 };
 
 struct FieldExpr final : Expr {
@@ -169,6 +190,7 @@ struct ReturnStmt final : Stmt {
 struct Param {
     std::string name;
     TypePtr type;
+    ExprPtr defaultValue;
     SourceSpan span;
 };
 
@@ -195,8 +217,12 @@ struct StructDecl final : Decl {
 
 struct FunctionDecl final : Decl {
     std::string name;
+    // For method syntax: fn Point.sum(self: Point) -> int32 { ... }
+    std::vector<std::string> methodOf;
     std::vector<Param> params;
     TypePtr returnType;
     std::unique_ptr<BlockStmt> body;
+    // Filled by semantic analysis. Empty means codegen will derive the name.
+    std::string qualifiedNameForCodegen;
 };
 }
