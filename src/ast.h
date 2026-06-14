@@ -35,11 +35,16 @@ struct Decl : Node {
     virtual ~Decl() = default;
 };
 
+enum class Access { //A.2.12 
+    Public,
+    Private
+};
+
 using TypePtr = std::unique_ptr<TypeExpr>;
 using ExprPtr = std::unique_ptr<Expr>;
 using StmtPtr = std::unique_ptr<Stmt>;
 using DeclPtr = std::unique_ptr<Decl>;
-struct Module final : Node {
+struct Module final : Node { //A.2.20
     std::vector<std::string> namePath;
     std::vector<DeclPtr> decls;
 };
@@ -108,29 +113,30 @@ struct CastExpr final : Expr {
     TypePtr targetType;
 };
 
-struct SizeOfExpr final : Expr {
+struct SizeOfExpr final : Expr { //A.1.13 sizeof
     TypePtr targetType;
 };
 
-struct TypeIdExpr final : Expr {
+struct TypeIdExpr final : Expr { //A.1.13 typeof typeid
     ExprPtr target;
     // typeid(expr) and typeof(expr) are compile-time meta expressions;
     // both produce the canonical type name as a string literal at runtime.
     bool fromTypeofKeyword = false;
+    /*return parseTypeIdExpr(first, false); // для typeid
+    return parseTypeIdExpr(first, true);  // для typeof*/
 };
 
-struct IfExpr final : Expr {
+struct IfExpr final : Expr {  // A.1.10 где в АСТ отдельный узел IfExpr
     ExprPtr condition;
     ExprPtr thenValue;
     ExprPtr elseValue;
 };
-
-struct CallExpr final : Expr {
+// A.1.11 обычный вызов функции 
+// A.2.9 named arguments хранятся в AST
+struct CallExpr final : Expr { 
     ExprPtr callee;
     std::vector<ExprPtr> args;
     std::vector<std::optional<std::string>> argNames;
-    // Filled by semantic analysis. It allows codegen to call overloaded
-    // functions and methods after name resolution/mangling.
     std::optional<std::string> resolvedCalleeName;
 };
 
@@ -149,7 +155,7 @@ struct BlockStmt final : Stmt {
     std::vector<StmtPtr> statements;
 };
 
-struct LetStmt final : Stmt {
+struct LetStmt final : Stmt { //А.1.7 
     std::string name;
     TypePtr explicitType;
     ExprPtr initializer;
@@ -187,16 +193,19 @@ struct ReturnStmt final : Stmt {
     ExprPtr value;
 };
 
-struct Param {
+struct Param { //A.2.9 DEFAULT - parametr gde xranytsya
     std::string name;
     TypePtr type;
+
     ExprPtr defaultValue;
+
     SourceSpan span;
 };
 
-struct FieldDecl {
+struct FieldDecl { //A.2.12 поля структур
     std::string name;
     TypePtr type;
+    Access access = Access::Public;
     SourceSpan span;
 };
 
@@ -214,15 +223,16 @@ struct StructDecl final : Decl {
     std::string name;
     std::vector<FieldDecl> fields;
 };
-
-struct FunctionDecl final : Decl {
+//функции/методы
+struct FunctionDecl final : Decl { //А.1.7 
     std::string name;
-    // For method syntax: fn Point.sum(self: Point) -> int32 { ... }
-    std::vector<std::string> methodOf;
+
+    Access access = Access::Public;
+    std::vector<std::string> methodOf; //methodOf показывает, что это метод структуры.
+
     std::vector<Param> params;
     TypePtr returnType;
     std::unique_ptr<BlockStmt> body;
-    // Filled by semantic analysis. Empty means codegen will derive the name.
     std::string qualifiedNameForCodegen;
 };
 }

@@ -1,0 +1,12 @@
+fn f(x: int64) -> int64 {
+    return x;
+}
+
+fn f(x: uint64) -> uint64 {
+    return x;
+}
+
+fn main() -> int32 {
+    print(f(10));
+    return 0;
+}

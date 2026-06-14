@@ -1,0 +1,13 @@
+fn main() -> int32 {
+    let x: int32 = 10;
+
+    let result: int32 = if (x > 5) {
+        100
+    } else {
+        200
+    };
+
+    print(result);
+
+    return 0;
+}

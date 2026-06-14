@@ -410,3 +410,283 @@ $ASTRA tests/invalids/condition.astra -o tests/bin/condition
 answer: tests/invalids/condition.astra:2:9: error: условие if должно быть bool, получен int32
 echo "Код возврата компилятора: $?"
 Код возврата компилятора: 1
+
+###
+
+mkdir -p tests/valids tests/bin
+ASTRA=./build/src/astra
+
+cat > tests/valids/a1_06_type_inference.astra <<'ASTRA'
+fn square(x: int32) {
+    return x * x;
+}
+
+fn main() -> int32 {
+    let value = square(5);
+
+    print(value);
+
+    return 0;
+}
+ASTRA
+
+cat > tests/valids/a1_08_bitwise_ops.astra <<'ASTRA'
+fn main() -> int32 {
+    let a: int32 = 6;
+    let b: int32 = 3;
+
+    print(a & b);
+    print(a | b);
+    print(a ^ b);
+    print(a << 1);
+    print(a >> 1);
+    print(~0);
+
+    return 0;
+}
+ASTRA
+
+cat > tests/valids/a1_09_pipeline_operator.astra <<'ASTRA'
+fn inc(x: int32) {
+    return x + 1;
+}
+
+fn double(x: int32) {
+    return x * 2;
+}
+
+fn main() -> int32 {
+    let a: int32 = 5 |> inc;
+    let b: int32 = a |> double;
+
+    print(a);
+    print(b);
+
+    return 0;
+}
+ASTRA
+
+cat > tests/valids/a1_11_meta_sizeof_typeid_typeof.astra <<'ASTRA'
+struct Point {
+    x: int32;
+    y: int32;
+}
+
+fn main() -> int32 {
+    let x: int32 = 10;
+    let p: Point = Point { x: 3, y: 4 };
+
+    print(sizeof(int32));
+    print(sizeof(int64));
+    print(typeid(x));
+    print(typeof(x));
+    print(typeid(p));
+
+    return 0;
+}
+ASTRA
+
+cat > tests/valids/a1_12_block_comments.astra <<'ASTRA'
+fn main() -> int32 {
+    /*
+        Это блочный комментарий.
+        Он должен быть проигнорирован лексером.
+
+        /* Это вложенный комментарий */
+    */
+
+    print(10);
+    return 0;
+}
+ASTRA
+
+cat > tests/valids/a2_01_if_expression.astra <<'ASTRA'
+fn main() -> int32 {
+    let x: int32 = 10;
+
+    let result: int32 = if (x > 5) {
+        100
+    } else {
+        200
+    };
+
+    print(result);
+
+    return 0;
+}
+ASTRA
+
+cat > tests/valids/a2_03_struct_methods.astra <<'ASTRA'
+struct Point {
+    x: int32;
+    y: int32;
+}
+
+fn Point.sum(self: Point) -> int32 {
+    return self.x + self.y;
+}
+
+fn Point.scaleX(self: Point, k: int32) -> int32 {
+    return self.x * k;
+}
+
+fn main() -> int32 {
+    let p: Point = Point { x: 3, y: 4 };
+
+    print(p.sum());
+    print(p.scaleX(10));
+
+    return 0;
+}
+ASTRA
+
+cat > tests/valids/a2_09_function_overloading.astra <<'ASTRA'
+fn show(x: int32) -> int32 {
+    print(x);
+    return x;
+}
+
+fn show(x: string) -> int32 {
+    print(x);
+    return 0;
+}
+
+fn main() -> int32 {
+    show(123);
+    show("hello overload");
+
+    return 0;
+}
+ASTRA
+
+cat > tests/valids/a2_10_default_named_args.astra <<'ASTRA'
+fn repeat(value: int32, times: int32 = 2) -> int32 {
+    var i: int32 = 0;
+    var sum: int32 = 0;
+
+    while (i < times) {
+        sum = sum + value;
+        i = i + 1;
+    }
+
+    return sum;
+}
+
+fn main() -> int32 {
+    print(repeat(5));
+    print(repeat(value = 7));
+    print(repeat(value = 3, times = 4));
+    print(repeat(times = 5, value = 2));
+
+    return 0;
+}
+ASTRA
+
+cat > tests/valids/a2_13_module_decl.astra <<'ASTRA'
+module score85;
+
+fn main() -> int32 {
+    print(85);
+    return 0;
+}
+ASTRA
+
+cat > tests/valids/a3_01_overload_implicit_cast.astra <<'ASTRA'
+fn choose(x: int64) -> int64 {
+    return x + (1000 as int64);
+}
+
+fn main() -> int32 {
+    print(choose(5));
+
+    return 0;
+}
+ASTRA
+
+echo
+echo "======================================"
+echo "A.1.6 — вывод типов для let и функций"
+echo "======================================"
+$ASTRA tests/valids/a1_06_type_inference.astra -o tests/bin/a1_06_type_inference
+./tests/bin/a1_06_type_inference
+echo "Код возврата: $?"
+
+echo
+echo "======================================"
+echo "A.1.8 — битовые операции"
+echo "======================================"
+$ASTRA tests/valids/a1_08_bitwise_ops.astra -o tests/bin/a1_08_bitwise_ops
+./tests/bin/a1_08_bitwise_ops
+echo "Код возврата: $?"
+
+echo
+echo "======================================"
+echo "A.1.9 — конвейерный оператор |>"
+echo "======================================"
+$ASTRA tests/valids/a1_09_pipeline_operator.astra -o tests/bin/a1_09_pipeline_operator
+./tests/bin/a1_09_pipeline_operator
+echo "Код возврата: $?"
+
+echo
+echo "======================================"
+echo "A.1.11 — sizeof, typeid, typeof"
+echo "======================================"
+$ASTRA tests/valids/a1_11_meta_sizeof_typeid_typeof.astra -o tests/bin/a1_11_meta_sizeof_typeid_typeof
+./tests/bin/a1_11_meta_sizeof_typeid_typeof
+echo "Код возврата: $?"
+
+echo
+echo "======================================"
+echo "A.1.12 — блочные комментарии /* ... */"
+echo "======================================"
+$ASTRA tests/valids/a1_12_block_comments.astra -o tests/bin/a1_12_block_comments
+./tests/bin/a1_12_block_comments
+echo "Код возврата: $?"
+
+echo
+echo "======================================"
+echo "A.2.1 — if как выражение"
+echo "======================================"
+$ASTRA tests/valids/a2_01_if_expression.astra -o tests/bin/a2_01_if_expression
+./tests/bin/a2_01_if_expression
+echo "Код возврата: $?"
+
+echo
+echo "======================================"
+echo "A.2.3 — методы структур"
+echo "======================================"
+$ASTRA tests/valids/a2_03_struct_methods.astra -o tests/bin/a2_03_struct_methods
+./tests/bin/a2_03_struct_methods
+echo "Код возврата: $?"
+
+echo
+echo "======================================"
+echo "A.2.9 — перегрузка функций"
+echo "======================================"
+$ASTRA tests/valids/a2_09_function_overloading.astra -o tests/bin/a2_09_function_overloading
+./tests/bin/a2_09_function_overloading
+echo "Код возврата: $?"
+
+echo
+echo "======================================"
+echo "A.2.10 — параметры по умолчанию и именованные аргументы"
+echo "======================================"
+$ASTRA tests/valids/a2_10_default_named_args.astra -o tests/bin/a2_10_default_named_args
+./tests/bin/a2_10_default_named_args
+echo "Код возврата: $?"
+
+echo
+echo "======================================"
+echo "A.2.13 — module name;"
+echo "======================================"
+$ASTRA tests/valids/a2_13_module_decl.astra -o tests/bin/a2_13_module_decl
+./tests/bin/a2_13_module_decl
+echo "Код возврата: $?"
+
+echo
+echo "======================================"
+echo "A.3.1 — перегрузка с неявными приведениями"
+echo "======================================"
+$ASTRA tests/valids/a3_01_overload_implicit_cast.astra -o tests/bin/a3_01_overload_implicit_cast
+./tests/bin/a3_01_overload_implicit_cast
+echo "Код возврата: $?"

@@ -63,39 +63,49 @@ private:
     struct FunctionInfo;
     struct StructInfo;
     enum class SymbolKind { Variable, Function, Struct, Alias, Namespace };
-    struct Symbol {
+
+    struct Symbol { //A.2.8 хранится список перегрузок
         SymbolKind kind = SymbolKind::Variable;
         std::string name;
         Type type = Type::error();
         bool isMutable = false;
         std::shared_ptr<FunctionInfo> function;
+
         std::vector<std::shared_ptr<FunctionInfo>> overloads;
+
         std::shared_ptr<StructInfo> structure;
         Scope* namespaceScope = nullptr;
     };
+
     struct Scope {
         Scope* parent = nullptr;
         bool isNamespace = false;
         std::string qualifiedName;
         std::unordered_map<std::string, Symbol> symbols;
     };
-    struct FunctionInfo {
+    //что хранит одна функция
+    struct FunctionInfo { //A.2.8 
         std::string name;
         std::string qualifiedName;
         std::vector<std::string> paramNames;
+
         std::vector<Type> paramTypes;
+
         std::vector<AST::Expr*> defaultArgs;
         Type returnType = Type::unit();
         AST::FunctionDecl* decl = nullptr;
         bool isBuiltin = false;
         std::string builtinName;
         std::string codegenName;
+        AST::Access access = AST::Access::Public;
+        std::string ownerStructName;
     };
-    struct StructInfo {
+    struct StructInfo { //A.2.12
         std::string name;
         std::string qualifiedName;
         std::vector<std::pair<std::string, Type>> fieldsInOrder;
         std::unordered_map<std::string, Type> fields;
+        std::unordered_map<std::string, AST::Access> fieldAccess;
     };
     struct LValueInfo {
         Type type = Type::error();
@@ -106,16 +116,19 @@ private:
     std::string fileName_;
     std::vector<Diagnostic> diagnostics_;
     std::vector<std::unique_ptr<Scope>> ownedScopes_;
+    std::unordered_map<const AST::FunctionDecl*, std::shared_ptr<FunctionInfo>> predeclaredFunctions_;
     Scope* rootScope_ = nullptr;
     Scope* moduleScope_ = nullptr;
     Scope* currentScope_ = nullptr;
     std::vector<std::string> namespaceStack_;
     Type currentReturnType_ = Type::unit();
+    std::string currentMethodReceiver_;
     bool currentFunctionInfersReturn_ = false;
     bool currentFunctionSawReturnValue_ = false;
     int loopDepth_ = 0;
     Scope* makeScope(Scope* parent, bool isNamespace, std::string qualifiedName = {});
     Scope* ensureNamespace(Scope& scope, const std::string& name, const AST::Node& node);
+    void setModuleNamespace(const std::vector<std::string>& modulePath);
     std::string qualify(std::string_view name) const;
     std::string joinPath(const std::vector<std::string>& path) const;
     void addDiagnostic(const AST::Node& node, std::string message);
@@ -128,6 +141,15 @@ private:
     Symbol* lookupLexical(const std::string& name);
     Symbol* resolvePath(const std::vector<std::string>& path, const AST::Node& node);
     Symbol* resolvePathFromScope(Scope& start, const std::vector<std::string>& path, const AST::Node& node);
+    void predeclareTypeNames(const std::vector<AST::DeclPtr>& decls);
+    void predeclareStructName(AST::StructDecl& decl);
+    void predeclareAliases(const std::vector<AST::DeclPtr>& decls);
+    void predeclareAliasDecl(AST::TypeAliasDecl& decl);
+    void predeclareFunctions(const std::vector<AST::DeclPtr>& decls);
+    void predeclareFunctionDecl(AST::FunctionDecl& decl);
+    bool hasRecursiveStructByValue(const std::string& structName, const Type& fieldType, std::vector<std::string>& path);
+    void analyzeNonFunctionDecls(const std::vector<AST::DeclPtr>& decls);
+    void analyzeFunctionDeclsOnly(const std::vector<AST::DeclPtr>& decls);
     void analyzeDecl(AST::Decl& decl);
     void analyzeNamespaceDecl(AST::NamespaceDecl& decl);
     void analyzeTypeAliasDecl(AST::TypeAliasDecl& decl);
@@ -160,6 +182,10 @@ private:
     bool canCast(const Type& from, const Type& to) const;
     std::string mangleFunctionName(const std::string& qualifiedName, const std::vector<Type>& params) const;
     Symbol* lookupMethod(const std::string& receiverType, const std::string& methodName);
+    bool canAccessStructMember(const std::string& ownerStructName) const;
+    void checkFunctionAccess(const FunctionInfo& fn, const AST::Node& node, const std::string& displayName);
+    Symbol* findStructByQualifiedName(const std::string& qualifiedName);
+    Symbol* findStructByQualifiedNameInScope(Scope& scope, const std::string& qualifiedName);
     bool isPrintable(const Type& type) const;
     bool isTerminatingCall(const AST::Expr& expr) const;
 };

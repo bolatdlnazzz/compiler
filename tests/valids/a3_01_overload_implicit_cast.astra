@@ -1,0 +1,9 @@
+fn choose(x: int64) -> int64 {
+    return x + (1000 as int64);
+}
+
+fn main() -> int32 {
+    print(choose(5));
+
+    return 0;
+}

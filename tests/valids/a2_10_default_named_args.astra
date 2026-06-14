@@ -1,0 +1,20 @@
+fn repeat(value: int32, times: int32 = 2) -> int32 {
+    var i: int32 = 0;
+    var sum: int32 = 0;
+
+    while (i < times) {
+        sum = sum + value;
+        i = i + 1;
+    }
+
+    return sum;
+}
+
+fn main() -> int32 {
+    print(repeat(5));
+    print(repeat(value = 7));
+    print(repeat(value = 3, times = 4));
+    print(repeat(times = 5, value = 2));
+
+    return 0;
+}

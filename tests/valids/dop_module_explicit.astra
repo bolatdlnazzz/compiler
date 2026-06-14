@@ -1,0 +1,16 @@
+module geometry;
+
+struct Point {
+    x: int32;
+    y: int32;
+}
+
+fn sum(p: Point) -> int32 {
+    return p.x + p.y;
+}
+
+fn main() -> int32 {
+    let p: Point = Point { x: 3, y: 4 };
+    print(sum(p));
+    return 0;
+}

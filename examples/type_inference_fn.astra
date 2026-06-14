@@ -1,0 +1,53 @@
+// Пример 2: Вывод типа функции из return
+// Компилируется в: ./build/src/astra examples/type_inference_fn.astra --emit-asm -o build/type_inference_fn.asm
+
+// Вывод типа: int32 (из return a + b)
+fn add(a: int32, b: int32) {
+    return a + b;
+}
+
+// Вывод типа: bool (из return условия)
+fn is_even(n: int32) {
+    return n % 2 == 0;
+}
+
+// Вывод типа: unit (нет return, просто побочные эффекты)
+fn greet(name: string) {
+    print("Hello, ");
+    print(name);
+}
+
+// Вывод типа: int32 (несколько return, все int32)
+fn abs(x: int32) {
+    if (x < 0) {
+        return -x;
+    }
+    return x;
+}
+
+// Явный тип функции (выводить не надо)
+fn multiply(a: int32, b: int32) -> int32 {
+    return a * b;
+}
+
+// Вывод типа: string (из return "value")
+fn get_greeting() {
+    return "Welcome!";
+}
+
+fn main() -> int32 {
+    let sum = add(5, 3);           // sum: int32
+    let even = is_even(4);         // even: bool
+    greet("World");                // return типа unit
+    let absolute = abs(-10);       // absolute: int32
+    let prod = multiply(4, 5);     // prod: int32
+    let msg = get_greeting();      // msg: string
+    
+    print(sum);
+    print(even);
+    print(absolute);
+    print(prod);
+    print(msg);
+    
+    return 0;
+}

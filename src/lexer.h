@@ -45,6 +45,8 @@ private:
     std::size_t index_ = 0;
     int line_ = 1;
     int column_ = 1;
+    bool pendingBlockCommentError_ = false;
+    Position pendingBlockCommentErrorPos_{};
     char peek() const;
     char peekNext() const;
     char advance();
@@ -58,7 +60,7 @@ private:
     Token charLiteral(Position startPos);
     void skipWhitespace();
     void skipComment();
-    void skipBlockComment();
+    void skipBlockComment(); //блочные комментарии
     void skipWhitespaceAndComments();
     static bool isAlpha(char c);
     static bool isDigit(char c);

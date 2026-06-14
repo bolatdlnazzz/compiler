@@ -1,0 +1,6 @@
+module score85;
+
+fn main() -> int32 {
+    print(85);
+    return 0;
+}

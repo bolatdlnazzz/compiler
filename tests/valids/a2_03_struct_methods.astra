@@ -1,0 +1,21 @@
+struct Point {
+    x: int32;
+    y: int32;
+}
+
+fn Point.sum(self: Point) -> int32 {
+    return self.x + self.y;
+}
+
+fn Point.scaleX(self: Point, k: int32) -> int32 {
+    return self.x * k;
+}
+
+fn main() -> int32 {
+    let p: Point = Point { x: 3, y: 4 };
+
+    print(p.sum());
+    print(p.scaleX(10));
+
+    return 0;
+}

@@ -1,0 +1,19 @@
+module demo;
+
+struct Counter {
+    public value: int32;
+}
+
+private fn Counter.hidden(self: Counter) -> int32 {
+    return self.value + 1;
+}
+
+public fn Counter.show(self: Counter) -> int32 {
+    return self.hidden();
+}
+
+fn main() -> int32 {
+    let c: Counter = Counter { value: 41 };
+    print(c.show());
+    return 0;
+}

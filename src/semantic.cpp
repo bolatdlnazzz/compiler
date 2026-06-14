@@ -182,7 +182,11 @@ Analyzer::Scope* Analyzer::ensureNamespace(Scope& scope, const std::string& name
     scope.symbols[name] = std::move(sym);
     return ns;
 }
-
+//A.2.20
+void Analyzer::setModuleNamespace(const std::vector<std::string>& modulePath) {
+    namespaceStack_ = modulePath;
+}
+//A.2.20
 std::string Analyzer::qualify(std::string_view name) const {
     if (namespaceStack_.empty()) return std::string(name);
     std::string result;
@@ -198,7 +202,10 @@ std::string Analyzer::joinPath(const std::vector<std::string>& path) const {
 }
 
 std::string Analyzer::mangleFunctionName(const std::string& qualifiedName, const std::vector<Type>& params) const {
-    if (qualifiedName == "main") return "main";
+    if (params.empty() && (qualifiedName == "main" ||
+                           (qualifiedName.size() > 6 && qualifiedName.ends_with("::main")))) {
+        return "main";
+    }
     std::string out = qualifiedName;
     out += "__";
     if (params.empty()) out += "void";
@@ -229,6 +236,16 @@ Analyzer::Symbol* Analyzer::lookupMethod(const std::string& receiverType, const 
         }
     }
     return nullptr;
+}
+
+bool Analyzer::canAccessStructMember(const std::string& ownerStructName) const { //A.2.12
+    return !ownerStructName.empty() && currentMethodReceiver_ == ownerStructName;
+}
+//A.2.12
+void Analyzer::checkFunctionAccess(const FunctionInfo& fn, const AST::Node& node, const std::string& displayName) {
+    if (fn.access == AST::Access::Private && !canAccessStructMember(fn.ownerStructName)) {
+        addDiagnostic(node, "private-метод '" + displayName + "' доступен только из методов структуры " + fn.ownerStructName);
+    }
 }
 
 void Analyzer::addDiagnostic(const AST::Node& node, std::string message) {
@@ -264,9 +281,10 @@ void Analyzer::installBuiltins() {
     addBuiltinFunction("len",   Type::integer("int32", 32, false));
 }
 
-bool Analyzer::declare(Scope& scope, const Symbol& symbol, const AST::Node& node) {
+bool Analyzer::declare(Scope& scope, const Symbol& symbol, const AST::Node& node) { //A.2.8 запрещает одинаковая сигнатура
     auto it = scope.symbols.find(symbol.name);
     if (it != scope.symbols.end()) {
+
         if (it->second.kind == SymbolKind::Function && symbol.kind == SymbolKind::Function && symbol.function) {
             auto& overloads = it->second.overloads;
             if (overloads.empty() && it->second.function) overloads.push_back(it->second.function);
@@ -342,12 +360,12 @@ Analyzer::Symbol* Analyzer::resolvePath(const std::vector<std::string>& path, co
 bool Analyzer::analyze(AST::Module& module) {
     diagnostics_.clear();
     ownedScopes_.clear();
+    predeclaredFunctions_.clear();
     rootScope_ = makeScope(nullptr, false, "");
     installBuiltins();
-    if (!module.namePath.empty()) {
+    if (!module.namePath.empty()) { //A.2.20
         Scope* s = rootScope_;
         for (const auto& part : module.namePath) {
-            std::string q = s->qualifiedName.empty() ? part : s->qualifiedName + "::" + part;
             s = ensureNamespace(*s, part, module);
         }
         moduleScope_ = s;
@@ -355,7 +373,20 @@ bool Analyzer::analyze(AST::Module& module) {
         moduleScope_ = rootScope_;
     }
     currentScope_ = moduleScope_;
-    for (auto& decl : module.decls) analyzeDecl(*decl);
+    setModuleNamespace(module.namePath);
+    predeclareTypeNames(module.decls);
+    currentScope_ = moduleScope_;
+    setModuleNamespace(module.namePath);
+    predeclareAliases(module.decls);
+    currentScope_ = moduleScope_;
+    setModuleNamespace(module.namePath);
+    predeclareFunctions(module.decls);
+    currentScope_ = moduleScope_;
+    setModuleNamespace(module.namePath);
+    analyzeNonFunctionDecls(module.decls);
+    currentScope_ = moduleScope_;
+    setModuleNamespace(module.namePath);
+    analyzeFunctionDeclsOnly(module.decls);
     Symbol* mainSym = lookupLexical("main");
     if (!mainSym || mainSym->kind != SymbolKind::Function || mainSym->overloads.empty()) {
         addDiagnostic(module, "программа должна содержать функцию main");
@@ -373,6 +404,160 @@ bool Analyzer::analyze(AST::Module& module) {
         if (!okMain) addDiagnostic(*mainSym->overloads.front()->decl, "функция main должна иметь сигнатуру main() -> int32/int64");
     }
     return diagnostics_.empty();
+}
+
+
+
+void Analyzer::predeclareTypeNames(const std::vector<AST::DeclPtr>& decls) {
+    for (auto& decl : decls) {
+        if (auto* ns = dynamic_cast<AST::NamespaceDecl*>(decl.get())) {
+            Scope* nsScope = ensureNamespace(*currentScope_, ns->name, *ns);
+            Scope* saved = currentScope_;
+            currentScope_ = nsScope;
+            namespaceStack_.push_back(ns->name);
+            predeclareTypeNames(ns->decls);
+            namespaceStack_.pop_back();
+            currentScope_ = saved;
+        } else if (auto* st = dynamic_cast<AST::StructDecl*>(decl.get())) {
+            predeclareStructName(*st);
+        }
+    }
+}
+
+void Analyzer::predeclareStructName(AST::StructDecl& decl) {
+    const std::string qname = qualify(decl.name);
+    auto info = std::make_shared<StructInfo>();
+    info->name = decl.name;
+    info->qualifiedName = qname;
+
+    Symbol sym;
+    sym.kind = SymbolKind::Struct;
+    sym.name = decl.name;
+    sym.type = Type::structure(qname);
+    sym.structure = info;
+    declare(*currentScope_, sym, decl);
+}
+
+
+void Analyzer::predeclareAliases(const std::vector<AST::DeclPtr>& decls) {
+    for (auto& decl : decls) {
+        if (auto* ns = dynamic_cast<AST::NamespaceDecl*>(decl.get())) {
+            Scope* nsScope = ensureNamespace(*currentScope_, ns->name, *ns);
+            Scope* saved = currentScope_;
+            currentScope_ = nsScope;
+            namespaceStack_.push_back(ns->name);
+            predeclareAliases(ns->decls);
+            namespaceStack_.pop_back();
+            currentScope_ = saved;
+        } else if (auto* ta = dynamic_cast<AST::TypeAliasDecl*>(decl.get())) {
+            predeclareAliasDecl(*ta);
+        }
+    }
+}
+
+void Analyzer::predeclareAliasDecl(AST::TypeAliasDecl& decl) {
+    Type aliased = resolveType(*decl.aliasedType);
+    Symbol sym;
+    sym.kind = SymbolKind::Alias;
+    sym.name = decl.name;
+    sym.type = aliased;
+    declare(*currentScope_, sym, decl);
+}
+
+void Analyzer::predeclareFunctions(const std::vector<AST::DeclPtr>& decls) {
+    for (auto& decl : decls) {
+        if (auto* ns = dynamic_cast<AST::NamespaceDecl*>(decl.get())) {
+            Scope* nsScope = ensureNamespace(*currentScope_, ns->name, *ns);
+            Scope* saved = currentScope_;
+            currentScope_ = nsScope;
+            namespaceStack_.push_back(ns->name);
+            predeclareFunctions(ns->decls);
+            namespaceStack_.pop_back();
+            currentScope_ = saved;
+        } else if (auto* fn = dynamic_cast<AST::FunctionDecl*>(decl.get())) {
+            predeclareFunctionDecl(*fn);
+        }
+    }
+}
+
+void Analyzer::predeclareFunctionDecl(AST::FunctionDecl& decl) {
+    const std::string sourceName = decl.methodOf.empty()
+        ? decl.name
+        : joinPath(decl.methodOf) + "::" + decl.name;
+    const std::string qname = qualify(sourceName);
+
+    auto info = std::make_shared<FunctionInfo>();
+    info->name = sourceName;
+    info->qualifiedName = qname;
+    info->decl = &decl;
+    info->access = decl.access;
+
+    for (auto& p : decl.params) {
+        Type pt = resolveType(*p.type);
+        info->paramNames.push_back(p.name);
+        info->paramTypes.push_back(pt);
+        info->defaultArgs.push_back(p.defaultValue.get());
+    }
+
+    if (!decl.methodOf.empty() && !decl.params.empty()) {
+        const std::string receiverName = joinPath(decl.methodOf);
+        Type receiver = resolveType(*decl.params[0].type);
+        if (!receiver.isError()) info->ownerStructName = receiver.name;
+        if (!receiver.isError() && receiver.name != receiverName && receiver.name != qualify(receiverName)) {
+            addDiagnostic(decl, "первый параметр метода должен иметь тип " + receiverName);
+        }
+    }
+
+    if (decl.returnType) info->returnType = resolveType(*decl.returnType);
+    else info->returnType = Type::error();
+
+    info->codegenName = mangleFunctionName(qname, info->paramTypes);
+    if (qname == "main") info->codegenName = "main";
+    decl.qualifiedNameForCodegen = info->codegenName;
+
+    Symbol sym;
+    sym.kind = SymbolKind::Function;
+    sym.name = sourceName;
+    sym.type = info->returnType;
+    sym.function = info;
+    if (declare(*currentScope_, sym, decl)) {
+        predeclaredFunctions_[&decl] = info;
+    }
+}
+
+
+void Analyzer::analyzeNonFunctionDecls(const std::vector<AST::DeclPtr>& decls) {
+    for (auto& decl : decls) {
+        if (auto* ns = dynamic_cast<AST::NamespaceDecl*>(decl.get())) {
+            Scope* nsScope = ensureNamespace(*currentScope_, ns->name, *ns);
+            Scope* saved = currentScope_;
+            currentScope_ = nsScope;
+            namespaceStack_.push_back(ns->name);
+            analyzeNonFunctionDecls(ns->decls);
+            namespaceStack_.pop_back();
+            currentScope_ = saved;
+        } else if (auto* ta = dynamic_cast<AST::TypeAliasDecl*>(decl.get())) {
+            analyzeTypeAliasDecl(*ta);
+        } else if (auto* st = dynamic_cast<AST::StructDecl*>(decl.get())) {
+            analyzeStructDecl(*st);
+        }
+    }
+}
+
+void Analyzer::analyzeFunctionDeclsOnly(const std::vector<AST::DeclPtr>& decls) {
+    for (auto& decl : decls) {
+        if (auto* ns = dynamic_cast<AST::NamespaceDecl*>(decl.get())) {
+            Scope* nsScope = ensureNamespace(*currentScope_, ns->name, *ns);
+            Scope* saved = currentScope_;
+            currentScope_ = nsScope;
+            namespaceStack_.push_back(ns->name);
+            analyzeFunctionDeclsOnly(ns->decls);
+            namespaceStack_.pop_back();
+            currentScope_ = saved;
+        } else if (auto* fn = dynamic_cast<AST::FunctionDecl*>(decl.get())) {
+            analyzeFunctionDecl(*fn);
+        }
+    }
 }
 
 void Analyzer::analyzeDecl(AST::Decl& decl) {
@@ -394,6 +579,11 @@ void Analyzer::analyzeNamespaceDecl(AST::NamespaceDecl& decl) {
 
 void Analyzer::analyzeTypeAliasDecl(AST::TypeAliasDecl& decl) {
     Type aliased = resolveType(*decl.aliasedType);
+    if (Symbol* existing = lookupLocal(*currentScope_, decl.name);
+        existing && existing->kind == SymbolKind::Alias) {
+        existing->type = aliased;
+        return;
+    }
     Symbol sym;
     sym.kind = SymbolKind::Alias;
     sym.name = decl.name;
@@ -403,42 +593,118 @@ void Analyzer::analyzeTypeAliasDecl(AST::TypeAliasDecl& decl) {
 
 void Analyzer::analyzeStructDecl(AST::StructDecl& decl) {
     const std::string qname = qualify(decl.name);
-    auto info = std::make_shared<StructInfo>();
-    info->name = decl.name;
-    info->qualifiedName = qname;
-    for (auto& f : decl.fields) {
+    std::shared_ptr<StructInfo> info;
+    if (Symbol* existing = lookupLocal(*currentScope_, decl.name);
+        existing && existing->kind == SymbolKind::Struct && existing->structure) {
+        info = existing->structure;
+        info->fieldsInOrder.clear();
+        info->fields.clear();
+        info->fieldAccess.clear();
+    } else {
+        info = std::make_shared<StructInfo>();
+        info->name = decl.name;
+        info->qualifiedName = qname;
+        Symbol sym;
+        sym.kind = SymbolKind::Struct;
+        sym.name = decl.name;
+        sym.type = Type::structure(qname);
+        sym.structure = info;
+        declare(*currentScope_, sym, decl);
+    }
+
+    for (auto& f : decl.fields) { //A.2.12
         Type ft = resolveType(*f.type);
+        if (info->fields.find(f.name) != info->fields.end()) {
+            addDiagnostic(decl, "поле '" + f.name + "' уже объявлено в структуре " + info->qualifiedName);
+            continue;
+        }
+        std::vector<std::string> path;
+        if (hasRecursiveStructByValue(info->qualifiedName, ft, path)) {
+            addDiagnostic(decl, "рекурсивная структура по значению: " + info->qualifiedName + " содержит поле '" + f.name + "' типа " + ft.toString());
+        }
         info->fieldsInOrder.push_back({f.name, ft});
         info->fields[f.name] = ft;
+        info->fieldAccess[f.name] = f.access;
     }
-    Symbol sym;
-    sym.kind = SymbolKind::Struct;
-    sym.name = decl.name;
-    sym.type = Type::structure(qname);
-    sym.structure = info;
-    declare(*currentScope_, sym, decl);
+}
+
+
+bool Analyzer::hasRecursiveStructByValue(const std::string& structName, const Type& fieldType, std::vector<std::string>& path) {
+    if (fieldType.kind == Type::Kind::Array && fieldType.elementType) {
+        return hasRecursiveStructByValue(structName, *fieldType.elementType, path);
+    }
+    if (fieldType.kind != Type::Kind::Struct) {
+        return false;
+    }
+    if (fieldType.name == structName) {
+        return true;
+    }
+    if (std::find(path.begin(), path.end(), fieldType.name) != path.end()) {
+        return false;
+    }
+    path.push_back(fieldType.name);
+    Symbol* sym = findStructByQualifiedName(fieldType.name);
+    if (!sym || !sym->structure) {
+        path.pop_back();
+        return false;
+    }
+    for (const auto& [fieldName, nestedType] : sym->structure->fieldsInOrder) {
+        (void)fieldName;
+        if (hasRecursiveStructByValue(structName, nestedType, path)) {
+            path.pop_back();
+            return true;
+        }
+    }
+    path.pop_back();
+    return false;
 }
 
 void Analyzer::analyzeFunctionDecl(AST::FunctionDecl& decl) {
-    const std::string sourceName = decl.methodOf.empty()
-        ? decl.name
-        : joinPath(decl.methodOf) + "::" + decl.name;
-    const std::string qname = qualify(sourceName);
-    auto info = std::make_shared<FunctionInfo>();
-    info->name = sourceName;
-    info->qualifiedName = qname;
-    info->decl = &decl;
-
+    std::shared_ptr<FunctionInfo> info;
+    auto preIt = predeclaredFunctions_.find(&decl);
+    if (preIt != predeclaredFunctions_.end()) {
+        info = preIt->second;
+    } else {
+        const std::string sourceName = decl.methodOf.empty()
+            ? decl.name
+            : joinPath(decl.methodOf) + "::" + decl.name;
+        const std::string qname = qualify(sourceName);
+        info = std::make_shared<FunctionInfo>();
+        info->name = sourceName;
+        info->qualifiedName = qname;
+        info->decl = &decl;
+        info->access = decl.access;
+        for (auto& p : decl.params) {
+            Type pt = resolveType(*p.type);
+            info->paramNames.push_back(p.name);
+            info->paramTypes.push_back(pt);
+            info->defaultArgs.push_back(p.defaultValue.get());
+        }
+        if (decl.returnType) info->returnType = resolveType(*decl.returnType);
+        else info->returnType = Type::error();
+        info->codegenName = mangleFunctionName(qname, info->paramTypes);
+        if (qname == "main") info->codegenName = "main";
+        decl.qualifiedNameForCodegen = info->codegenName;
+        Symbol sym;
+        sym.kind = SymbolKind::Function;
+        sym.name = sourceName;
+        sym.type = info->returnType;
+        sym.function = info;
+        declare(*currentScope_, sym, decl);
+    }
+    //A.2.9 semantic проверяет deafult-параметр
     bool sawDefault = false;
-    for (auto& p : decl.params) {
-        Type pt = resolveType(*p.type);
-        info->paramNames.push_back(p.name);
-        info->paramTypes.push_back(pt);
-        info->defaultArgs.push_back(p.defaultValue.get());
+
+    for (std::size_t i = 0; i < decl.params.size(); ++i) {
+        auto& p = decl.params[i];
+        const Type& pt = info->paramTypes[i];
+
         if (p.defaultValue) {
             sawDefault = true;
             Type dt = analyzeExpr(*p.defaultValue, pt);
+
             if (!dt.isError() && !pt.isError()) checkAssignable(pt, dt, *p.defaultValue);
+
         } else if (sawDefault) {
             addDiagnostic(decl, "параметр без значения по умолчанию не может идти после параметра со значением по умолчанию");
         }
@@ -450,33 +716,23 @@ void Analyzer::analyzeFunctionDecl(AST::FunctionDecl& decl) {
         } else {
             const std::string receiverName = joinPath(decl.methodOf);
             Type receiver = resolveType(*decl.params[0].type);
+            if (!receiver.isError()) info->ownerStructName = receiver.name;
             if (!receiver.isError() && receiver.name != receiverName && receiver.name != qualify(receiverName)) {
                 addDiagnostic(decl, "первый параметр метода должен иметь тип " + receiverName);
             }
         }
     }
 
-    if (decl.returnType) info->returnType = resolveType(*decl.returnType);
-    else info->returnType = Type::error();
-    info->codegenName = mangleFunctionName(qname, info->paramTypes);
-    if (qname == "main") info->codegenName = "main";
-    decl.qualifiedNameForCodegen = info->codegenName;
-
-    Symbol sym;
-    sym.kind = SymbolKind::Function;
-    sym.name = sourceName;
-    sym.type = info->returnType;
-    sym.function = info;
-    declare(*currentScope_, sym, decl);
-
     Scope* saved = currentScope_;
     Scope* fnScope = makeScope(currentScope_, false);
     currentScope_ = fnScope;
     Type savedReturn = currentReturnType_;
+    std::string savedMethodReceiver = currentMethodReceiver_;
+    currentMethodReceiver_ = info->ownerStructName;
     bool savedInfers = currentFunctionInfersReturn_;
     bool savedSawReturn = currentFunctionSawReturnValue_;
     currentReturnType_ = info->returnType;
-    currentFunctionInfersReturn_ = !decl.returnType;
+    currentFunctionInfersReturn_ = !decl.returnType; //A.1.7 где включается режим вывода return-типа функции
     currentFunctionSawReturnValue_ = false;
 
     for (std::size_t i = 0; i < decl.params.size(); ++i) {
@@ -487,11 +743,14 @@ void Analyzer::analyzeFunctionDecl(AST::FunctionDecl& decl) {
         paramSym.isMutable = false;
         declare(*currentScope_, paramSym, decl);
     }
+    //A.1.7 где после тела функции сохраняется найденный return type
     analyzeBlock(*decl.body, false);
     if (!decl.returnType) {
         info->returnType = currentFunctionSawReturnValue_ ? currentReturnType_ : Type::unit();
     }
+
     currentReturnType_ = savedReturn;
+    currentMethodReceiver_ = savedMethodReceiver;
     currentFunctionInfersReturn_ = savedInfers;
     currentFunctionSawReturnValue_ = savedSawReturn;
     currentScope_ = saved;
@@ -549,13 +808,14 @@ Analyzer::Flow Analyzer::analyzeBlock(AST::BlockStmt& block, bool createScope) {
 Analyzer::Flow Analyzer::analyzeStmt(AST::Stmt& stmt) {
     if (dynamic_cast<AST::EmptyStmt*>(&stmt)) return Flow::MayContinue;
     if (auto* b = dynamic_cast<AST::BlockStmt*>(&stmt)) return analyzeBlock(*b, true);
-    if (auto* let = dynamic_cast<AST::LetStmt*>(&stmt)) {
+
+    if (auto* let = dynamic_cast<AST::LetStmt*>(&stmt)) { // A.1.7  
         std::optional<Type> expected;
         if (let->explicitType) expected = resolveType(*let->explicitType);
         Type init = analyzeExpr(*let->initializer, expected);
         if (expected && !expected->isError() && !init.isError())
             checkAssignable(*expected, init, *let->initializer);
-        Type varType = expected.value_or(init);
+        Type varType = expected.value_or(init); // A.1.7 где выводится тип let
         if (varType.isError()) varType = init;
         Symbol sym;
         sym.kind = SymbolKind::Variable;
@@ -565,6 +825,7 @@ Analyzer::Flow Analyzer::analyzeStmt(AST::Stmt& stmt) {
         declare(*currentScope_, sym, stmt);
         return Flow::MayContinue;
     }
+
     if (auto* var = dynamic_cast<AST::VarStmt*>(&stmt)) {
         Type declared = resolveType(*var->explicitType);
         Type init = analyzeExpr(*var->initializer, declared);
@@ -600,9 +861,11 @@ Analyzer::Flow Analyzer::analyzeStmt(AST::Stmt& stmt) {
         if (loopDepth_ == 0) addDiagnostic(stmt, "continue вне цикла");
         return Flow::MayContinue;
     }
+
     if (auto* ret = dynamic_cast<AST::ReturnStmt*>(&stmt)) {
         if (ret->value) {
-            if (currentFunctionInfersReturn_) {
+            // A.1.7 где первый return задает тип функции
+            if (currentFunctionInfersReturn_) { // A.1.7 выывод типа функции
                 Type vt = analyzeExpr(*ret->value);
                 if (!vt.isError()) {
                     if (!currentFunctionSawReturnValue_) {
@@ -626,6 +889,7 @@ Analyzer::Flow Analyzer::analyzeStmt(AST::Stmt& stmt) {
         }
         return Flow::NoContinue;
     }
+
     addDiagnostic(stmt, "неизвестный оператор");
     return Flow::MayContinue;
 }
@@ -700,17 +964,17 @@ Type Analyzer::analyzeExpr(AST::Expr& expr, const std::optional<Type>& expected)
     }
     else if (auto* e = dynamic_cast<AST::CastExpr*>(&expr)) {
         result = analyzeCast(*e);
-    }
-    else if (auto* e = dynamic_cast<AST::SizeOfExpr*>(&expr)) {
+    } 
+    else if (auto* e = dynamic_cast<AST::SizeOfExpr*>(&expr)) { //A.1.13 отправляются на проверку
         result = analyzeSizeOf(*e);
     }
-    else if (auto* e = dynamic_cast<AST::TypeIdExpr*>(&expr)) {
+    else if (auto* e = dynamic_cast<AST::TypeIdExpr*>(&expr)) { //A.1.13 отправляются на проверку
         result = analyzeTypeId(*e);
     }
-    else if (auto* e = dynamic_cast<AST::IfExpr*>(&expr)) {
+    else if (auto* e = dynamic_cast<AST::IfExpr*>(&expr)) { //A.1.10 где IfExpr отправляется на проверку
         result = analyzeIfExpr(*e, expected);
     }
-    else if (auto* e = dynamic_cast<AST::CallExpr*>(&expr)) {
+    else if (auto* e = dynamic_cast<AST::CallExpr*>(&expr)) { //A.1.11 где семантика проверяет уже как обычный вызов функции
         result = analyzeCall(*e);
     }
     else if (auto* e = dynamic_cast<AST::FieldExpr*>(&expr)) {
@@ -770,6 +1034,11 @@ Type Analyzer::analyzeStructLiteral(AST::StructLiteralExpr& expr) {
             addDiagnostic(expr, "поле '" + f.name + "' не существует в структуре " + info.qualifiedName);
             analyzeExpr(*f.value);
         } else {
+            auto accessIt = info.fieldAccess.find(f.name);
+            if (accessIt != info.fieldAccess.end() && accessIt->second == AST::Access::Private &&
+                !canAccessStructMember(info.qualifiedName)) {
+                addDiagnostic(*f.value, "private-поле '" + f.name + "' доступно только из методов структуры " + info.qualifiedName);
+            }
             Type vt = analyzeExpr(*f.value, it->second);
             if (!vt.isError() && !it->second.isError())
                 checkAssignable(it->second, vt, *f.value);
@@ -873,28 +1142,32 @@ Type Analyzer::analyzeCast(AST::CastExpr& expr) {
     return to;
 }
 
-Type Analyzer::analyzeSizeOf(AST::SizeOfExpr& expr) {
+Type Analyzer::analyzeSizeOf(AST::SizeOfExpr& expr) { //A.1.13 проверка sizeof
     Type t = resolveType(*expr.targetType);
     (void)t;
     return Type::integer("int32", 32, false);
 }
 
-Type Analyzer::analyzeTypeId(AST::TypeIdExpr& expr) {
+Type Analyzer::analyzeTypeId(AST::TypeIdExpr& expr) { // A.1.13 proverka typeid и typeof
     Type t = analyzeExpr(*expr.target);
     (void)t;
     return Type::string();
 }
 
 
-Type Analyzer::analyzeIfExpr(AST::IfExpr& expr, const std::optional<Type>& expected) {
+Type Analyzer::analyzeIfExpr(AST::IfExpr& expr, const std::optional<Type>& expected) { //A.1.10 главная проверка if-expression
     Type cond = analyzeExpr(*expr.condition, Type::boolean());
     if (!cond.isError() && cond.kind != Type::Kind::Bool) {
         addDiagnostic(*expr.condition, "условие if-выражения должно иметь тип bool");
     }
+
     Type thenType = analyzeExpr(*expr.thenValue, expected);
     Type elseType = analyzeExpr(*expr.elseValue, expected ? expected : std::optional<Type>(thenType));
+
     if (thenType.isError() || elseType.isError()) return Type::error();
+
     if (thenType == elseType) return thenType;
+
     if (canAssignSilently(thenType, elseType)) {
         expr.elseValue = wrapImplicitCast(std::move(expr.elseValue), thenType);
         return thenType;
@@ -903,6 +1176,7 @@ Type Analyzer::analyzeIfExpr(AST::IfExpr& expr, const std::optional<Type>& expec
         expr.thenValue = wrapImplicitCast(std::move(expr.thenValue), elseType);
         return elseType;
     }
+
     addDiagnostic(expr, "ветки if-выражения имеют несовместимые типы: " + thenType.toString() + " и " + elseType.toString());
     return Type::error();
 }
@@ -989,12 +1263,12 @@ Type Analyzer::analyzeCall(AST::CallExpr& expr) {
         for (auto& a : expr.args) if (a) analyzeExpr(*a);
         return Type::error();
     }
-
+    //A.2.8 cначала собираются типы переданных аргументов
     std::vector<Type> providedTypes;
     providedTypes.reserve(expr.args.size());
     for (auto& a : expr.args) providedTypes.push_back(analyzeExpr(*a));
 
-    auto candidateScore = [&](const FunctionInfo& fn) -> std::optional<int> {
+    auto candidateScore = [&](const FunctionInfo& fn) -> std::optional<int> { //A.3.1
         std::vector<bool> filled(fn.paramTypes.size(), false);
         std::size_t nextPos = 0;
         int score = 0;
@@ -1023,12 +1297,12 @@ Type Analyzer::analyzeCall(AST::CallExpr& expr) {
         }
         return score;
     };
-
-    std::shared_ptr<FunctionInfo> selected;
+    //A.3.1 
+    std::shared_ptr<FunctionInfo> selected; 
     std::optional<int> bestScore;
     bool ambiguous = false;
-    for (auto& fn : sym->overloads) {
-        if (!fn) continue;
+    for (auto& fn : sym->overloads) { //A.2.8 проверка кандидатов
+        if (!fn) continue; 
         auto score = candidateScore(*fn);
         if (!score) continue;
         if (!selected || *score < *bestScore) {
@@ -1048,9 +1322,12 @@ Type Analyzer::analyzeCall(AST::CallExpr& expr) {
         return Type::error();
     }
 
-    // Normalize named/default arguments into plain positional arguments for codegen.
+    checkFunctionAccess(*selected, expr, displayName);
+
+    //A.2.9 SEMANTIC ПОДСТАВЛЯЕТ DEAFULT& NAMED ARGS
     std::vector<AST::ExprPtr> normalized(selected->paramTypes.size());
     std::size_t nextPos = 0;
+
     for (std::size_t i = 0; i < expr.args.size(); ++i) {
         std::size_t target = 0;
         if (i < expr.argNames.size() && expr.argNames[i]) {
@@ -1062,6 +1339,7 @@ Type Analyzer::analyzeCall(AST::CallExpr& expr) {
         }
         if (target < normalized.size()) normalized[target] = std::move(expr.args[i]);
     }
+
     for (std::size_t i = 0; i < normalized.size(); ++i) {
         if (!normalized[i] && i < selected->defaultArgs.size() && selected->defaultArgs[i]) {
             normalized[i] = cloneExpr(*selected->defaultArgs[i]);
@@ -1069,6 +1347,7 @@ Type Analyzer::analyzeCall(AST::CallExpr& expr) {
             if (!dt.isError()) checkAssignable(selected->paramTypes[i], dt, *normalized[i]);
         }
     }
+
     expr.args = std::move(normalized);
     expr.argNames.clear();
 
@@ -1081,7 +1360,33 @@ Type Analyzer::analyzeCall(AST::CallExpr& expr) {
 
     expr.resolvedCalleeName = selected->codegenName.empty() ? selected->qualifiedName : selected->codegenName;
     if (expr.callee) setType(*expr.callee, selected->returnType);
-    return selected->returnType;
+    return selected->returnType; // A.1.7 где вызов функции получает тип её return type
+
+}
+
+
+Analyzer::Symbol* Analyzer::findStructByQualifiedNameInScope(Scope& scope, const std::string& qualifiedName) {
+    for (auto& [name, sym] : scope.symbols) {
+        if (sym.kind == SymbolKind::Struct && sym.structure && sym.structure->qualifiedName == qualifiedName) {
+            return &sym;
+        }
+        if (sym.kind == SymbolKind::Namespace && sym.namespaceScope) {
+            if (Symbol* found = findStructByQualifiedNameInScope(*sym.namespaceScope, qualifiedName)) {
+                return found;
+            }
+        }
+    }
+    return nullptr;
+}
+
+Analyzer::Symbol* Analyzer::findStructByQualifiedName(const std::string& qualifiedName) {
+    if (rootScope_) {
+        if (Symbol* found = findStructByQualifiedNameInScope(*rootScope_, qualifiedName)) return found;
+    }
+    if (moduleScope_ && moduleScope_ != rootScope_) {
+        if (Symbol* found = findStructByQualifiedNameInScope(*moduleScope_, qualifiedName)) return found;
+    }
+    return nullptr;
 }
 
 Type Analyzer::analyzeField(AST::FieldExpr& expr) {
@@ -1093,12 +1398,7 @@ Type Analyzer::analyzeField(AST::FieldExpr& expr) {
     }
     Symbol* sym = lookupLexical(objType.name);
     if (!sym) {
-        for (auto& [k, v] : rootScope_->symbols) {
-            if (v.kind == SymbolKind::Struct && v.structure && v.structure->qualifiedName == objType.name) {
-                sym = &v;
-                break;
-            }
-        }
+        sym = findStructByQualifiedName(objType.name);
     }
     if (!sym || !sym->structure) {
         addDiagnostic(expr, "не найдена структура " + objType.toString());
@@ -1108,6 +1408,12 @@ Type Analyzer::analyzeField(AST::FieldExpr& expr) {
     if (it == sym->structure->fields.end()) {
         addDiagnostic(expr, "поле '" + expr.field + "' не существует в " + objType.toString());
         return Type::error();
+    }
+    //A.2.12
+    auto accessIt = sym->structure->fieldAccess.find(expr.field);
+    if (accessIt != sym->structure->fieldAccess.end() && accessIt->second == AST::Access::Private &&
+        !canAccessStructMember(sym->structure->qualifiedName)) {
+        addDiagnostic(expr, "private-поле '" + expr.field + "' доступно только из методов структуры " + sym->structure->qualifiedName);
     }
     return it->second;
 }
@@ -1159,7 +1465,7 @@ Analyzer::LValueInfo Analyzer::analyzeLValue(AST::Expr& expr) {
 }
 
 
-int Analyzer::implicitConversionScore(const Type& lhs, const Type& rhs) const {
+int Analyzer::implicitConversionScore(const Type& lhs, const Type& rhs) const { //A.3.1
     if (lhs == rhs) return 0;
     if ((lhs.kind == Type::Kind::Int || lhs.kind == Type::Kind::UInt) &&
         (rhs.kind == Type::Kind::Int || rhs.kind == Type::Kind::UInt) &&

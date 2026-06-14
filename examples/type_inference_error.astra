@@ -1,0 +1,14 @@
+// Пример 3: ОШИБКА при несовместимых типах return
+// Компилируется в: ./build/src/astra examples/type_inference_error.astra
+// Ожидаемый результат: error (типы несовместимы)
+
+fn bad_function() {
+    if (true) {
+        return 42;        // ← int32
+    }
+    return "hello";       // ← string — НЕСОВМЕСТИМО!
+}
+
+fn main() -> int32 {
+    return 0;
+}

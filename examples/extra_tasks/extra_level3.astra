@@ -1,0 +1,24 @@
+fn widen(x: int64) -> int64 {
+    return x + (1 as int64);
+}
+
+fn widen(x: float64) -> float64 {
+    return x + 0.5;
+}
+
+fn take_u64(x: uint64) -> uint64 {
+    return x + (1 as uint64);
+}
+
+fn main() -> int32 {
+    let a = widen(10);
+    print(a);
+
+    let b = widen(1.5);
+    print(b);
+
+    let c = take_u64(5);
+    print(c);
+
+    return 0;
+}

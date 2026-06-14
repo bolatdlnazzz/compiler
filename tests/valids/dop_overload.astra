@@ -1,0 +1,16 @@
+fn show(x: int32) -> int32 {
+    print(x);
+    return x;
+}
+
+fn show(x: string) -> int32 {
+    print(x);
+    return 0;
+}
+
+fn main() -> int32 {
+    show(123);
+    show("hello overload");
+
+    return 0;
+}

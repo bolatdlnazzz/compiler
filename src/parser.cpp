@@ -1,6 +1,7 @@
 #include "parser.h"
 
 #include <charconv>
+#include <cctype>
 #include <sstream>
 #include <utility>
 
@@ -64,7 +65,9 @@ void Parser::synchronizeTopLevel() {
             check(Lexer::TokenType::Keyword, "namespace") ||
             check(Lexer::TokenType::Keyword, "type") ||
             check(Lexer::TokenType::Keyword, "struct") ||
-            check(Lexer::TokenType::Keyword, "fn")) {
+            check(Lexer::TokenType::Keyword, "fn") ||
+            check(Lexer::TokenType::Keyword, "public") ||
+            check(Lexer::TokenType::Keyword, "private")) {
             return;
         }
         advance();
@@ -112,7 +115,7 @@ std::string Parser::expectIdentifierLike(std::string_view message) {
     panicMode_ = true;
     return "<error>";
 }
-
+//A.2.20
 std::vector<std::string> Parser::parseNamePath() {
     std::vector<std::string> path;
     if (!isNameLike(peek()) && !isTypeNameLike(peek())) {
@@ -135,10 +138,39 @@ std::vector<std::string> Parser::parseNamePath() {
 std::vector<std::string> Parser::parseModuleNamePath() {
     std::vector<std::string> path;
     path.push_back(expectIdentifierLike("ожидалось имя модуля"));
-    while (match(Lexer::TokenType::Operator, "::")) {
-        path.push_back(expectIdentifierLike("ожидалось имя модуля после '::'"));
+    while (match(Lexer::TokenType::Operator, "::") || match(Lexer::TokenType::Operator, ".")) {
+        path.push_back(expectIdentifierLike("ожидалось имя модуля после разделителя"));
     }
     return path;
+}
+//A.2.20
+std::vector<std::string> Parser::implicitModuleNameFromFile() const {
+    std::string base = fileName_;
+    const std::size_t slash = base.find_last_of("/\\");
+    if (slash != std::string::npos) base = base.substr(slash + 1);
+    const std::size_t dot = base.find_last_of('.');
+    if (dot != std::string::npos) base = base.substr(0, dot);
+
+    std::string ident;
+    for (char ch : base) {
+        unsigned char uc = static_cast<unsigned char>(ch);
+        if (std::isalnum(uc) || ch == '_') ident.push_back(ch);
+        else if (!ident.empty() && ident.back() != '_') ident.push_back('_');
+    }
+
+    if (ident.empty() || std::isdigit(static_cast<unsigned char>(ident.front()))) {
+        return {};
+    }
+    if (ident == "input" || ident == "output" || ident == "stdin" || ident == "stdout") {
+        return {};
+    }
+    return {ident};
+}
+
+AST::Access Parser::parseAccessModifier() { //A.2.12
+    if (match(Lexer::TokenType::Keyword, "private")) return AST::Access::Private;
+    if (match(Lexer::TokenType::Keyword, "public")) return AST::Access::Public;
+    return AST::Access::Public;
 }
 
 AST::SourceSpan Parser::spanFrom(const Lexer::Token& first, const Lexer::Token& last) const {
@@ -179,14 +211,19 @@ char Parser::decodeCharLiteral(std::string_view lexeme) {
         default: return lexeme[2];
     }
 }
-
+//A.2.20
 std::unique_ptr<AST::Module> Parser::parseModule() {
     auto module = std::make_unique<AST::Module>();
     const auto first = peek();
+    bool hasExplicitModule = false;
     if (match(Lexer::TokenType::Keyword, "module")) {
+        hasExplicitModule = true;
         module->namePath = parseModuleNamePath();
         expect(Lexer::TokenType::Separator, ";", "ожидался ';' после объявления module");
         panicMode_ = false;
+    }
+    if (!hasExplicitModule) {
+        module->namePath = implicitModuleNameFromFile();
     }
     while (!isAtEnd()) {
         if (check(Lexer::TokenType::Keyword, "module")) {
@@ -209,13 +246,31 @@ std::unique_ptr<AST::Module> Parser::parseModule() {
         : spanFrom(first, previous());
     return module;
 }
-
+//A.2.12 public/private примменяется к функции
 AST::DeclPtr Parser::parseDeclaration() {
-    if (match(Lexer::TokenType::Keyword, "namespace")) return parseNamespaceDecl();
-    if (match(Lexer::TokenType::Keyword, "type"))      return parseTypeAliasDecl();
-    if (match(Lexer::TokenType::Keyword, "struct"))    return parseStructDecl();
-    if (match(Lexer::TokenType::Keyword, "fn"))        return parseFunctionDecl();
-    errorAt(peek(), "ожидалось верхнеуровневое объявление: namespace, type, struct или fn");
+    const bool hadAccessModifier = check(Lexer::TokenType::Keyword, "public") ||
+                                   check(Lexer::TokenType::Keyword, "private");
+    AST::Access access = parseAccessModifier();
+
+    if (match(Lexer::TokenType::Keyword, "namespace")) {
+        if (hadAccessModifier) errorAt(previous(), "public/private допустимы только для методов/функций");
+        return parseNamespaceDecl();
+    }
+    if (match(Lexer::TokenType::Keyword, "type")) {
+        if (hadAccessModifier) errorAt(previous(), "public/private допустимы только для методов/функций");
+        return parseTypeAliasDecl();
+    }
+    if (match(Lexer::TokenType::Keyword, "struct")) {
+        if (hadAccessModifier) errorAt(previous(), "public/private допустимы для полей и методов, но не для struct");
+        return parseStructDecl();
+    }
+    if (match(Lexer::TokenType::Keyword, "fn")) return parseFunctionDecl(access);
+
+    if (hadAccessModifier) {
+        errorAt(peek(), "после public/private ожидалось объявление fn");
+    } else {
+        errorAt(peek(), "ожидалось верхнеуровневое объявление: namespace, type, struct или fn");
+    }
     panicMode_ = true;
     return nullptr;
 }
@@ -227,6 +282,7 @@ std::unique_ptr<AST::NamespaceDecl> Parser::parseNamespaceDecl() {
     if (panicMode_) return node;
     expect(Lexer::TokenType::Separator, "{", "ожидался '{' после имени namespace");
     if (panicMode_) return node;
+    //A.2.12
     while (!isAtEnd() && !check(Lexer::TokenType::Separator, "}")) {
         if (panicMode_) { synchronizeTopLevel(); continue; }
         AST::DeclPtr decl = parseDeclaration();
@@ -266,6 +322,7 @@ std::unique_ptr<AST::StructDecl> Parser::parseStructDecl() {
         if (panicMode_) { synchronizeStatement(); continue; }
         AST::FieldDecl field;
         const auto fieldFirst = peek();
+        field.access = parseAccessModifier();
         field.name = expectIdentifierLike("ожидалось имя поля структуры");
         if (panicMode_) { synchronizeStatement(); continue; }
         expect(Lexer::TokenType::Separator, ":", "ожидался ':' после имени поля");
@@ -283,12 +340,13 @@ std::unique_ptr<AST::StructDecl> Parser::parseStructDecl() {
     return node;
 }
 
-std::unique_ptr<AST::FunctionDecl> Parser::parseFunctionDecl() {
+std::unique_ptr<AST::FunctionDecl> Parser::parseFunctionDecl(AST::Access access) { // А.1.7 
     const auto first = previous();
     auto node = std::make_unique<AST::FunctionDecl>();
+    node->access = access;
     node->name = expectIdentifierLike("ожидалось имя функции");
     if (panicMode_) return node;
-    if (match(Lexer::TokenType::Operator, ".")) {
+    if (match(Lexer::TokenType::Operator, ".")) { 
         node->methodOf.push_back(node->name);
         node->name = expectIdentifierLike("ожидалось имя метода после '.'");
         if (panicMode_) return node;
@@ -300,16 +358,24 @@ std::unique_ptr<AST::FunctionDecl> Parser::parseFunctionDecl() {
             if (panicMode_) break;
             AST::Param param;
             const auto paramFirst = peek();
+            //A.2.9
             param.name = expectIdentifierLike("ожидалось имя параметра");
+
             if (panicMode_) break;
+
             expect(Lexer::TokenType::Separator, ":", "ожидался ':' перед типом параметра");
+
             if (panicMode_) break;
+
             param.type = parseTypeExpr();
+
             if (panicMode_) break;
-            if (match(Lexer::TokenType::Operator, "=")) {
+
+            if (match(Lexer::TokenType::Operator, "=")) { //A.2.9 glavnoe
                 param.defaultValue = parseExpression();
                 if (panicMode_) break;
             }
+
             param.span = spanFrom(paramFirst, previous());
             node->params.push_back(std::move(param));
         } while (!panicMode_ && match(Lexer::TokenType::Separator, ","));
@@ -317,7 +383,7 @@ std::unique_ptr<AST::FunctionDecl> Parser::parseFunctionDecl() {
     if (panicMode_) return node;
     expect(Lexer::TokenType::Separator, ")", "ожидался ')' после списка параметров");
     if (panicMode_) return node;
-    if (match(Lexer::TokenType::Separator, "->")) {
+    if (match(Lexer::TokenType::Separator, "->")) { // А.1.7 где ф-ция мб без -> Type
         node->returnType = parseTypeExpr();
         if (panicMode_) return node;
     }
@@ -466,7 +532,7 @@ AST::StmtPtr Parser::parseLetStmt() {
     auto s = std::make_unique<AST::LetStmt>();
     s->name = expectIdentifierLike("ожидалось имя переменной после let");
     if (panicMode_) return std::make_unique<AST::EmptyStmt>();
-    if (match(Lexer::TokenType::Separator, ":")) {
+    if (match(Lexer::TokenType::Separator, ":")) { //A.1.7 разрешает let без типа
         s->explicitType = parseTypeExpr();
         if (panicMode_) return std::make_unique<AST::EmptyStmt>();
     }
@@ -554,7 +620,7 @@ AST::StmtPtr Parser::parseReturnStmt() {
     return s;
 }
 
-AST::ExprPtr Parser::parseExpression(int minPrec) {
+AST::ExprPtr Parser::parseExpression(int minPrec) { 
     auto left = parseUnary();
     if (panicMode_) return left;
     while (true) {
@@ -575,7 +641,7 @@ AST::ExprPtr Parser::parseExpression(int minPrec) {
         const int nextMinPrec = isLeftAssociative(opTok) ? prec + 1 : prec;
         auto right = parseExpression(nextMinPrec);
         if (panicMode_) return left;
-        if (opTok.type == Lexer::TokenType::Operator && opTok.lexeme == "|>") {
+        if (opTok.type == Lexer::TokenType::Operator && opTok.lexeme == "|>") { //A.1.11 |> превращается в вызов функции
             if (auto* callRight = dynamic_cast<AST::CallExpr*>(right.get())) {
                 callRight->args.insert(callRight->args.begin(), std::move(left));
                 callRight->argNames.insert(callRight->argNames.begin(), std::nullopt);
@@ -625,14 +691,19 @@ AST::ExprPtr Parser::parsePostfix() {
             if (!check(Lexer::TokenType::Separator, ")")) {
                 do {
                     if (panicMode_) break;
+                    //A.2.9 PARSER CHUTAET NAMED ARGUMENT
                     std::optional<std::string> argName;
+
                     if ((peek().type == Lexer::TokenType::Identifier || isNameLike(peek())) &&
                         peek(1).type == Lexer::TokenType::Operator && peek(1).lexeme == "=") {
+                        
                         argName = advance().lexeme;
                         advance(); // '='
+
                     }
                     call->args.push_back(parseExpression());
                     call->argNames.push_back(std::move(argName));
+
                 } while (!panicMode_ && match(Lexer::TokenType::Separator, ","));
             }
             if (panicMode_) return call;
@@ -680,12 +751,14 @@ AST::ExprPtr Parser::parsePostfix() {
     return expr;
 }
 
-AST::ExprPtr Parser::parsePrimary() {
+AST::ExprPtr Parser::parsePrimary() { 
     const auto first = peek();
-    if (check(Lexer::TokenType::Keyword, "if")) {
+    if (check(Lexer::TokenType::Keyword, "if")) { //A.1.10 где if распознается как выражение 
         advance();
         return parseIfExpr(first);
     }
+    
+    //A.1.13 парсер узнает метафункции
     if (check(Lexer::TokenType::Keyword, "sizeof") || check(Lexer::TokenType::Identifier, "sizeof")) {
         advance();
         return parseSizeOfExpr(first);
@@ -698,6 +771,7 @@ AST::ExprPtr Parser::parsePrimary() {
         advance();
         return parseTypeIdExpr(first, true);
     }
+
     if (match(Lexer::TokenType::IntLiteral)) {
         auto e = std::make_unique<AST::IntLiteralExpr>();
         e->lexeme = previous().lexeme;
@@ -797,7 +871,9 @@ AST::ExprPtr Parser::parseSizeOfExpr(const Lexer::Token& first) {
     expect(Lexer::TokenType::Separator, "(", "ожидался '(' после sizeof");
     auto node = std::make_unique<AST::SizeOfExpr>();
     if (panicMode_) return node;
+    //A.1.13 sizeof внутри скобок ждёт тип.
     node->targetType = parseTypeExpr();
+
     if (panicMode_) return node;
     expect(Lexer::TokenType::Separator, ")", "ожидался ')' после аргумента sizeof");
     panicMode_ = false;
@@ -805,12 +881,15 @@ AST::ExprPtr Parser::parseSizeOfExpr(const Lexer::Token& first) {
     return node;
 }
 
+//A.1.13
 AST::ExprPtr Parser::parseTypeIdExpr(const Lexer::Token& first, bool isTypeof) {
     expect(Lexer::TokenType::Separator, "(", isTypeof ? "ожидался '(' после typeof" : "ожидался '(' после typeid");
     auto node = std::make_unique<AST::TypeIdExpr>();
     node->fromTypeofKeyword = isTypeof;
     if (panicMode_) return node;
+    //A.1.13 typeid/typeof внутри скобок ждут выражение, а не тип.
     node->target = parseExpression();
+
     if (panicMode_) return node;
     expect(Lexer::TokenType::Separator, ")", isTypeof ? "ожидался ')' после аргумента typeof" : "ожидался ')' после аргумента typeid");
     panicMode_ = false;
@@ -819,7 +898,7 @@ AST::ExprPtr Parser::parseTypeIdExpr(const Lexer::Token& first, bool isTypeof) {
 }
 
 
-AST::ExprPtr Parser::parseIfExpr(const Lexer::Token& first) {
+AST::ExprPtr Parser::parseIfExpr(const Lexer::Token& first) { //A.1.10 сама функция parseIfExpr
     auto node = std::make_unique<AST::IfExpr>();
     expect(Lexer::TokenType::Separator, "(", "ожидался '(' после if-выражения");
     if (panicMode_) return node;
@@ -854,7 +933,7 @@ bool Parser::isAssignable(const AST::Expr& expr) const {
 int Parser::precedenceOf(const Lexer::Token& tok) const {
     if (tok.type == Lexer::TokenType::Keyword && tok.lexeme == "as") return 10;
     if (tok.type != Lexer::TokenType::Operator) return 0;
-    if (tok.lexeme == "|>") return 1;
+    if (tok.lexeme == "|>") return 1; //A.1.11 оператор |> имеет самый низкий приоритет среди операторов выражений
     if (tok.lexeme == "||") return 2;
     if (tok.lexeme == "&&") return 3;
     if (tok.lexeme == "|") return 4;
@@ -868,7 +947,7 @@ int Parser::precedenceOf(const Lexer::Token& tok) const {
     return 0;
 }
 
-bool Parser::isLeftAssociative(const Lexer::Token&) const {
+bool Parser::isLeftAssociative(const Lexer::Token&) const { //A.1.11 все бинарные операторы у тебя левоассоциативные, включая |>.
     return true;
 }
 

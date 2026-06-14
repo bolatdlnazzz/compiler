@@ -56,6 +56,8 @@ private:
     std::string expectIdentifierLike(std::string_view message);
     std::vector<std::string> parseNamePath();
     std::vector<std::string> parseModuleNamePath();
+    std::vector<std::string> implicitModuleNameFromFile() const;
+    AST::Access parseAccessModifier();
     AST::SourceSpan spanFrom(const Lexer::Token& first,
                              const Lexer::Token& last) const;
     static std::string decodeStringLiteral(std::string_view lexeme);
@@ -64,7 +66,7 @@ private:
     std::unique_ptr<AST::NamespaceDecl> parseNamespaceDecl();
     std::unique_ptr<AST::TypeAliasDecl> parseTypeAliasDecl();
     std::unique_ptr<AST::StructDecl> parseStructDecl();
-    std::unique_ptr<AST::FunctionDecl> parseFunctionDecl();
+    std::unique_ptr<AST::FunctionDecl> parseFunctionDecl(AST::Access access = AST::Access::Public);
     AST::TypePtr parseTypeExpr();
     AST::StmtPtr parseStatement();
     std::unique_ptr<AST::BlockStmt> parseBlock();

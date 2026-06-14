@@ -1,0 +1,6 @@
+fn getx(p: P) -> int32 { return p.x; }
+struct P { x: int32; }
+fn main() -> int32 {
+    let p = P { x: 7 };
+    return getx(p);
+}

@@ -1,0 +1,11 @@
+struct Point {
+    x: int32;
+}
+
+fn Point.bad(self: int32) -> int32 {
+    return self;
+}
+
+fn main() -> int32 {
+    return 0;
+}

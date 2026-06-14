@@ -1,0 +1,17 @@
+fn inc(x: int32) {
+    return x + 1;
+}
+
+fn double(x: int32) {
+    return x * 2;
+}
+
+fn main() -> int32 {
+    let a: int32 = 5 |> inc;
+    let b: int32 = a |> double;
+
+    print(a);
+    print(b);
+
+    return 0;
+}

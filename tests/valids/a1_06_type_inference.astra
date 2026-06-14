@@ -1,0 +1,11 @@
+fn square(x: int32) {
+    return x * x;
+}
+
+fn main() -> int32 {
+    let value = square(5);
+
+    print(value);
+
+    return 0;
+}

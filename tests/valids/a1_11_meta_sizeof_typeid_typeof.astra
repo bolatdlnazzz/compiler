@@ -1,0 +1,17 @@
+struct Point {
+    x: int32;
+    y: int32;
+}
+
+fn main() -> int32 {
+    let x: int32 = 10;
+    let p: Point = Point { x: 3, y: 4 };
+
+    print(sizeof(int32));
+    print(sizeof(int64));
+    print(typeid(x));
+    print(typeof(x));
+    print(typeid(p));
+
+    return 0;
+}

@@ -1,0 +1,9 @@
+namespace N {
+    struct S { x: int32; }
+}
+
+fn main() -> int32 {
+    let s: N::S = N::S { x: 1 };
+    print(s.x);
+    return 0;
+}

@@ -70,7 +70,7 @@ std::string Generator::currentPrefix() const {
 }
 
 std::string Generator::asmSymbolForQualifiedName(const std::string& name) const {
-    if (name == "main") return "main";
+    if (name == "main" || (name.size() > 6 && name.ends_with("::main"))) return "main";
     std::string result = "astra_";
     for (char c : name) {
         if (std::isalnum(static_cast<unsigned char>(c))) result += c;
@@ -146,7 +146,7 @@ std::string Generator::escapeNasmStringBytes(const std::string& value) {
     out << 0;
     return out.str();
 }
-
+//A.1.13 создаются строковые константы
 std::string Generator::stringLabel(const std::string& value) {
     const std::string label = "LC" + std::to_string(stringData_.size());
     stringData_.push_back(label + ": db " + escapeNasmStringBytes(value));
@@ -225,8 +225,11 @@ bool Generator::generate(AST::Module& module, const std::string& asmPath) {
     return true;
 }
 
-void Generator::collectSymbols(AST::Module& module) {
+void Generator::collectSymbols(AST::Module& module) { //A.2.20
+    const std::size_t savedSize = namespaceStack_.size();
+    namespaceStack_.insert(namespaceStack_.end(), module.namePath.begin(), module.namePath.end());
     for (auto& decl : module.decls) collectSymbolsInDecl(*decl);
+    namespaceStack_.resize(savedSize);
 }
 
 void Generator::collectSymbolsInDecl(AST::Decl& decl) {
@@ -278,8 +281,11 @@ void Generator::collectStructLayout(const AST::StructDecl& st) {
     if (currentPrefix().empty()) structs_[st.name] = layout;
 }
 
-void Generator::emitModule(AST::Module& module) {
+void Generator::emitModule(AST::Module& module) { //A.2.20
+    const std::size_t savedSize = namespaceStack_.size();
+    namespaceStack_.insert(namespaceStack_.end(), module.namePath.begin(), module.namePath.end());
     for (auto& decl : module.decls) emitDecl(*decl);
+    namespaceStack_.resize(savedSize);
 }
 
 void Generator::emitDecl(AST::Decl& decl) {
@@ -360,6 +366,7 @@ const Generator::FieldLayout* Generator::findField(const std::string& type, cons
     return &st->fields[it->second];
 }
 
+//A.1.13 таблица размеров типов
 int Generator::typeSize(const std::string& type) const {
     if (type == "unit" || type.empty()) return 0;
     if (type == "bool" || type == "char" || type == "int8" || type == "uint8") return 1;
@@ -572,10 +579,13 @@ void Generator::emitExpr(AST::Expr& expr, FunctionContext& ctx) {
         emit("    lea rax, [rel " + stringLabel(s->value) + "]");
         return;
     }
+    //A.1.13 sizeof превращается в число
     if (auto* sz = dynamic_cast<AST::SizeOfExpr*>(&expr)) {
         emit("    mov rax, " + std::to_string(typeSize(typeExprToString(*sz->targetType))));
         return;
     }
+
+    //A.1.13 typeid/typeof превращаются в строку
     if (auto* tid = dynamic_cast<AST::TypeIdExpr*>(&expr)) {
         emit("    lea rax, [rel " + stringLabel(exprType(*tid->target)) + "]");
         return;
@@ -620,7 +630,7 @@ void Generator::emitExpr(AST::Expr& expr, FunctionContext& ctx) {
     if (auto* bin = dynamic_cast<AST::BinaryExpr*>(&expr)) return emitBinary(*bin, ctx);
     if (auto* cast = dynamic_cast<AST::CastExpr*>(&expr)) return emitCast(*cast, ctx);
     if (auto* call = dynamic_cast<AST::CallExpr*>(&expr)) return emitCall(*call, ctx);
-    if (auto* ifExpr = dynamic_cast<AST::IfExpr*>(&expr)) return emitIfExpr(*ifExpr, ctx);
+    if (auto* ifExpr = dynamic_cast<AST::IfExpr*>(&expr)) return emitIfExpr(*ifExpr, ctx); // A.1.10 if-expression превращается в asm
     if (dynamic_cast<AST::ArrayLiteralExpr*>(&expr) || dynamic_cast<AST::StructLiteralExpr*>(&expr)) {
         const int sz = std::max(8, alignTo(typeSize(type), 8));
         emit("    sub rsp, " + std::to_string(sz));
@@ -647,13 +657,16 @@ void Generator::emitExpr(AST::Expr& expr, FunctionContext& ctx) {
 }
 
 
-void Generator::emitIfExpr(AST::IfExpr& expr, FunctionContext& ctx) {
+void Generator::emitIfExpr(AST::IfExpr& expr, FunctionContext& ctx) { //A.1.10 сама генерация emitIfExpr
+
     const std::string elseLabel = freshLabel("ifexpr_else_");
     const std::string endLabel = freshLabel("ifexpr_end_");
     const std::string resultType = exprType(expr);
+
     emitExpr(*expr.condition, ctx);
     emit("    cmp rax, 0");
     emit("    je " + elseLabel);
+
     emitExpr(*expr.thenValue, ctx);
     if (isFloatType(resultType)) {
         emit("    sub rsp, 8");
@@ -664,6 +677,7 @@ void Generator::emitIfExpr(AST::IfExpr& expr, FunctionContext& ctx) {
         emitPush(ctx, "rax");
     }
     emit("    jmp " + endLabel);
+
     emit(elseLabel + ":");
     emitExpr(*expr.elseValue, ctx);
     if (isFloatType(resultType)) {

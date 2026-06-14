@@ -1,0 +1,57 @@
+/*
+   A.1.15: блочные комментарии.
+   Лексер поддерживает вложенность:
+   /* nested block comment */
+*/
+
+fn inc(x: int32) {
+    // A.1.7: тип результата функции выводится по return.
+    return x + 1;
+}
+
+fn main() -> int32 {
+    let base = 10;
+
+    let hexValue = 0x2A;
+    let binValue = 0b101010;
+    let letter: char = 'A';
+    let sci = 1.5e2;
+    let infinity = inf;
+    let notNumber = NaN;
+
+    print(base);
+    print(hexValue);
+    print(binValue);
+    print(letter);
+    print(sci);
+    print(infinity);
+    print(notNumber);
+
+    let shifted = 1 << 3;
+    let masked = (shifted | 2) & 10;
+    let toggled = masked ^ 3;
+    let inverted = ~0;
+
+    print(shifted);
+    print(masked);
+    print(toggled);
+    print(inverted);
+
+    let piped = 41 |> inc;
+    print(piped);
+
+    print(sizeof(int32));
+    print(typeid(piped));
+    print(typeof(piped));
+
+    let xs = [10, 20, 30];
+    print(len(xs));
+    print(len("hello"));
+
+    assert(hexValue == binValue);
+
+    let selected = if (masked == 10) { 100 } else { 200 };
+    print(selected);
+
+    return 0;
+}

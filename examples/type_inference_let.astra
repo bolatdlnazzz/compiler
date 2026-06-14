@@ -1,0 +1,24 @@
+// Пример 1: Вывод типа переменных (let)
+// Компилируется в: ./build/src/astra examples/type_inference_let.astra --emit-asm -o build/type_inference_let.asm
+
+fn main() -> int32 {
+    // Вывод типа из литералов
+    let x = 42;           // x: int32 (выведен)
+    let y = 3.14;         // y: float64 (выведен)
+    let z = true;         // z: bool (выведен)
+    let s = "hello";      // s: string (выведен)
+    
+    // Явный тип переопределяет вывод
+    let a: int16 = 100;   // a: int16 (явный)
+    
+    // Контекстный вывод: int32 хочет int32, но может быть int32 
+    let arr = [1, 2, 3];  // arr: [int32; 3] (выведен из элементов)
+    
+    print(x);
+    print(y);
+    print(z);
+    print(s);
+    print(a);
+    
+    return 0;
+}

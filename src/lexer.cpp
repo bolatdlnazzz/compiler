@@ -15,6 +15,8 @@ void Lexer::Lexer::reset() {
     index_ = 0;
     line_ = 1;
     column_ = 1;
+    pendingBlockCommentError_ = false;
+    pendingBlockCommentErrorPos_ = Position{};
 }
 
 const std::string& Lexer::Lexer::filename() const {
@@ -105,8 +107,9 @@ void Lexer::Lexer::skipComment() {
     }
 }
 
-void Lexer::Lexer::skipBlockComment() {
+void Lexer::Lexer::skipBlockComment() { //A.1.15 главное
     // Supports nested comments: /* outer /* inner */ outer */
+    Position startPos{line_, column_};
     int depth = 1;
     advance(); // '/'
     advance(); // '*'
@@ -125,9 +128,13 @@ void Lexer::Lexer::skipBlockComment() {
         }
         advance();
     }
+    if (depth > 0) {
+        pendingBlockCommentError_ = true;
+        pendingBlockCommentErrorPos_ = startPos;
+    }
 }
 
-void Lexer::Lexer::skipWhitespaceAndComments() {
+void Lexer::Lexer::skipWhitespaceAndComments() { //A.1.15 подключается пропуск комментариев 
     while (!isAtEnd()) {
         skipWhitespace();
         if (peek() == '/' && peekNext() == '/') {
@@ -136,6 +143,9 @@ void Lexer::Lexer::skipWhitespaceAndComments() {
         }
         if (peek() == '/' && peekNext() == '*') {
             skipBlockComment();
+            if (pendingBlockCommentError_) {
+                return;
+            }
             continue;
         }
         break;
@@ -144,6 +154,11 @@ void Lexer::Lexer::skipWhitespaceAndComments() {
 
 Token Lexer::Lexer::nextToken() {
     skipWhitespaceAndComments();
+    if (pendingBlockCommentError_) {
+        Position pos = pendingBlockCommentErrorPos_;
+        pendingBlockCommentError_ = false;
+        return errorToken("unterminated block comment", pos);
+    }
     Position startPos{line_, column_};
     if (isAtEnd()) {
         return makeToken(TokenType::EndOfFile, "", startPos);
@@ -194,11 +209,11 @@ Token Lexer::Lexer::nextToken() {
                 return makeToken(TokenType::Operator, "&&", startPos);
             }
             return makeToken(TokenType::Operator, "&", startPos);
-        case '|':
+        case '|': //A.1.11
             if (match('|')) {
                 return makeToken(TokenType::Operator, "||", startPos);
             }
-            if (match('>')) {
+            if (match('>')) { // A.1.11 |> распознаётся как оператор
                 return makeToken(TokenType::Operator, "|>", startPos);
             }
             return makeToken(TokenType::Operator, "|", startPos);
@@ -271,12 +286,12 @@ Token Lexer::Lexer::identifierOrKeyword(Position startPos) {
     if (lexeme == "inf" || lexeme == "NaN" || lexeme == "nan") {
         return makeToken(TokenType::FloatLiteral, lexeme == "nan" ? std::string("NaN") : lexeme, startPos);
     }
-    static const std::unordered_set<std::string> keywords = {
-        "module", "namespace", "type", "struct", "fn", "let", "var",
-        "if", "else", "while", "break", "continue", "return",
-        "as", "unit", "print", "input", "exit", "panic", "assert",
-        "sizeof", "typeid", "typeof", "len"
-    };
+    static const std::unordered_set<std::string> keywords = { 
+    "module", "namespace", "type", "struct", "fn", "let", "var",
+    "if", "else", "while", "break", "continue", "return",
+    "as", "unit", "print", "input", "exit", "panic", "assert",
+    "sizeof", "typeid", "typeof", "len", "public", "private" //A.1.13
+};
 
     if (keywords.contains(lexeme)) {
         return makeToken(TokenType::Keyword, lexeme, startPos);
