@@ -925,7 +925,7 @@ void Generator::emitFloatBinary(AST::BinaryExpr& expr, FunctionContext& ctx, con
     else emit("    movapd xmm0, xmm1");
 }
 
-void Generator::emitLogicalAnd(AST::BinaryExpr& expr, FunctionContext& ctx) {
+void Generator::emitLogicalAnd(AST::BinaryExpr& expr, FunctionContext& ctx) { //
     const std::string falseLabel = freshLabel("and_false_");
     const std::string endLabel = freshLabel("and_end_");
     emitExpr(*expr.left, ctx);

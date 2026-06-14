@@ -155,7 +155,7 @@ struct BlockStmt final : Stmt {
     std::vector<StmtPtr> statements;
 };
 
-struct LetStmt final : Stmt { //А.1.7 
+struct LetStmt final : Stmt { //A.1.7 
     std::string name;
     TypePtr explicitType;
     ExprPtr initializer;
